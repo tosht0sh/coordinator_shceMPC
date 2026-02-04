@@ -1,47 +1,114 @@
-# Template: template-ros
+# Basic setup and instructions
 
-This template provides a boilerplate repository
-for developing ROS-based software in Duckietown.
+In this file, there is instructions to setting up ROS package for duckietown for the first time. Basic processes can be followed using the instructions provided here. We will keep the publisher on the bot, and have the subscriber be able to run in both ways. 
 
-**NOTE:** If you want to develop software that does not use
-ROS, check out [this template](https://github.com/duckietown/template-basic).
+Basic things to keep in mind are:
+- All the code goes into `packages/` folder. Each module can be in a subfolder inside this folder.
+- We do not create a venv for dependencies. We need to mention them in the dependencies files as per the use case.
+- Each script that will be run should have a launch file in the `launchers/` folder.
+
+## Instructions to run files
+
+In this project, a simple publisher-subscriber architechture is made to run on a robot. The code can be founf in `packages/first_pkg`. Here is how to run it:
+
+1. There is two ways to build a project. You can do it only for the robot, or you can do it for the host laptop. ROS is still running on the bot.
+    
+    To build only on a particular bot, run
+    ```
+    dts devel build -H [robot_name] -f
+    ```
+
+    To build on the system, run
+    ```
+    dts devel build -f
+    ```
+
+2. Run the publisher using
+    
+    ```
+    dts devel run -H [ROBOT_NAME] -L simple_publisher
+    ```
+
+3. To run subscriber on bot, run
+
+    ```
+    dts devel run -H [ROBOT_NAME] -L simple_subscriber -n subscriber
+    ```
+
+    NOTE: The -n flag tells dts to run another docker instance of the bot to start the publisher. If we are running multiple scripts on the same system via docker, we need to add the -n and a name along with it.
+
+    To run subscriber on laptop, run
+
+    ```
+    dts devel run -R [ROBOT_NAME] -L simple_subscriber
+    ```
 
 
-## How to use it
+## Creating a package and nodes.
 
-### 1. Fork this repository
+1. make package using 
+    ```
+    mkdir -p ./packages/[PACKAGE_NAME]
+    ```
 
-Use the fork button in the top-right corner of the github page to fork this template repository.
+2. go to the folder made above and create
+
+    a. package.xml file
+    ```
+    <package>
+    <name>[PACKAGE_NAME]</name>
+    <version>0.0.1</version>
+    <description>
+    My first Catkin package in Duckietown.
+    </description>
+    <maintainer email="YOUR_EMAIL@EXAMPLE.COM">YOUR_FULL_NAME</maintainer>
+    <license>None</license>
+
+    <buildtool_depend>catkin</buildtool_depend>
+    </package>
+    ```
+
+    NOTE: change email and name.
+
+    b. CMakeLists.txt file
+    ```
+    cmake_minimum_required(VERSION 2.8.3)
+    project([PACKAGE_NAME])
+
+    find_package(catkin REQUIRED COMPONENTS
+    rospy
+    )
+
+    catkin_package()
+    ```
+
+3. create the source folder
+
+    go to the pacakages folder and create
+
+    ```
+    mkdir -p ./[PACKAGE_NAME]/src
+    ```
 
 
-### 2. Create a new repository
+Now you can create the speific scripts/nodes in the folder, and then to be able to run them, do
 
-Create a new repository on github.com while
-specifying the newly forked template repository as
-a template for your new repository.
+4. Make the script executable
 
+    ```
+    chmod +x ./packages/[PACKAGE_NAME]/src/[SCRIPT_NAME]
+    ```
 
-### 3. Define dependencies
+5. Make launcher script for script
 
-List the dependencies in the files `dependencies-apt.txt` and
-`dependencies-py3.txt` (apt packages and pip packages respectively).
+    Go to the root folder of the project and create `launcher/[LAUNCHER_NAME].sh` and write
 
+    ```
+    #!/bin/bash
+    source /environment.sh
+    dt-launchfile-init
+    rosrun my_package [SCRIPT_NAME]
+    dt-launchfile-join
+    ```
 
-### 4. Place your code
-
-Place your code in the directory `/packages/` of
-your new repository.
-
-
-### 5. Setup launchers
-
-The directory `/launchers` can contain as many launchers (launching scripts)
-as you want. A default launcher called `default.sh` must always be present.
-
-If you create an executable script (i.e., a file with a valid shebang statement)
-a launcher will be created for it. For example, the script file 
-`/launchers/my-launcher.sh` will be available inside the Docker image as the binary
-`dt-launcher-my-launcher`.
-
-When launching a new container, you can simply provide `dt-launcher-my-launcher` as
-command.
+Now, upon building the project, we will be able to run the project.
