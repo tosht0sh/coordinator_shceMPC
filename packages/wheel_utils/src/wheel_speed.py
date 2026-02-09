@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import os, math
 import rospy
 from duckietown_msgs.msg import WheelEncoderStamped
@@ -92,7 +93,7 @@ class TickToVelocity:
         self.wz_filt = self.wz_filt + alpha * (self.wz_raw - self.wz_filt)
 
     def spin(self):
-        rate = rospy.Rate(30)
+        rate = rospy.Rate(5)
         while not rospy.is_shutdown():
             self._update_robot_velocity_and_filter()
 

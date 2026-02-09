@@ -31,7 +31,7 @@ class ImuReaderNode(DTROS):
         # self.loginfo("IMU callback triggered (receiving messages)")
 
     def run(self):
-       rate = rospy.Rate(20)
+       rate = rospy.Rate(5)
        while not rospy.is_shutdown():
             if self._ang_vel is not None or self._lin_acc is not None:
                 # self.loginfo("Waiting for first IMU message...")
