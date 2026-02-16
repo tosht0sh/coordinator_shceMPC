@@ -21,6 +21,80 @@ The folder currently packages currently made are:
 3. Make the ROS architecture such that ROSCORE is on laptop and robots run only particular nodes that it needs to.
 4. Implement MPC on the bot.
 
+## Running ROSCORE on laptop
+
+In duckiebots we are using ROS1. For the communication we need, we would want the MPC on the bots, and the scheduler and coordinator on a laptop which will act as the main ROSCORE for our project. The version we need to run is ROS Noetic.
+
+Since we already did all our installations on Ubuntu 22.04 which does not have support for ROS1, we will need to use a docker instance of ROS Noetic. Below are instructions to get that to work. If you are using Ubuntu 20.04or a version that can support ROS1, you could directly have the ROSCORE running.
+
+1. In one terminal, go to the root folder of the project, run this command
+
+    ```
+    docker run -it --rm --network=host -v "$PWD":/coordinator_shceMPC -w /coordinator_shceMPC --name roscore_noetic ros:noetic-ros-core bash
+    ```
+
+    This will start a docker containerwhere we sun ROSCORE. To start the ROSCORE, do the following
+
+
+    a. Source ROS
+
+    ```
+    source /opt/ros/noetic/setup.bash
+    ```
+
+    b. Now we need to export the correct IP adresses to ensure communication. Find the adress of your laptop on the network that the bot is connected to. Use that as the IP adress. This setup is done for my laptop. When you work, the adress will change. Run the three following lines to make it work.
+
+    ```
+    unset ROS_HOSTNAME
+    export ROS_MASTER_URI=http://10.42.0.1:11311
+    export ROS_IP=10.42.0.1
+    ```
+
+
+    b. Start roscore
+
+    ```
+    roscore
+    ```
+
+    Keep this terminal running.
+
+2. In a new terminal, run the following command.
+
+    ```
+    docker exec -it roscore_noetic bash
+    ```
+    
+    This will start the bash that can be used to run ROS commands.
+
+    Then we do:
+
+    a. Source ROS
+
+    ```
+    source /opt/ros/noetic/setup.bash
+    ```
+
+    b. In a similar way to before, we need to set get the network settings into this terminal as well.
+    ```
+    unset ROS_HOSTNAME
+    export ROS_MASTER_URI=http://10.42.0.1:11311
+    export ROS_IP=10.42.0.1
+    ```
+    Now, all the ros commands can be run here.
+
+3. For the duckiebot sided code to work prooperly, you need to put the right network settings into the launch files. This is done in a similar way as before. Only, the ROS_IP will now be the robot's ip address on the network. Just add the followinf code before the dt-launchfile-init line in the launcher. This should enable communication between the bot and the laptop's roscore.
+
+    ```
+    unset ROS_HOSTNAME
+    export ROS_MASTER_URI=http://10.42.0.1:11311
+    export ROS_IP=10.42.0.129
+    ```
+
+    
+
+
+
 ## Instructions to run files
 
 In this project, a simple publisher-subscriber architechture is made to run on a robot. The code can be founf in `packages/first_pkg`. Here is how to run it:
