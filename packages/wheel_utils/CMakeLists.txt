@@ -3,5 +3,6 @@ project(wheel_utils)
 
 find_package(catkin REQUIRED COMPONENTS
 	rospy
+	duckietown_msgs
+	std_msgs
 ) 
-

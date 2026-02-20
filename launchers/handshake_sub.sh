@@ -3,9 +3,9 @@ set -e
 
 source /environment.sh
 
+# Keep bot on local ROS master.
 unset ROS_HOSTNAME
-export ROS_MASTER_URI=http://10.42.0.1:11311
-export ROS_IP=10.42.0.129
+export ROBOT_TCP_PORT=5006
 
 # initialize launch file
 dt-launchfile-init

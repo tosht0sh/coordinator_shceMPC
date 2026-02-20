@@ -5,12 +5,9 @@ import math
 import rospy
 from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import WheelEncoderStamped
+from std_msgs.msg import Float64MultiArray, String
 
 class WheelEncoderReaderNode(DTROS):
-    '''
-    Currently prints number of ticks
-    TODO: output position x,y,theta
-    '''
 
     def __init__(self, node_name):
         super(WheelEncoderReaderNode, self).__init__(
@@ -32,6 +29,7 @@ class WheelEncoderReaderNode(DTROS):
             WheelEncoderStamped,
             self.callback_right
         )
+        self.pose_pub = rospy.Publisher(f"/{self._vehicle_name}/pose_reader", Float64MultiArray, queue_size=10)
 
         # for 
         self._wheel_radius = 0.0325
@@ -106,6 +104,8 @@ class WheelEncoderReaderNode(DTROS):
                     f"{self.x:.3f}, {self.y:.3f}, {self.theta:.3f}"
                 )
                 rospy.loginfo(msg)
+                pose_msg = Float64MultiArray(data=[round(self.x, 3), round(self.y, 3), round(self.theta, 3)])
+                self.pose_pub.publish(pose_msg)
             rate.sleep()
 
 if __name__ == '__main__':
