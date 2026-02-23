@@ -11,7 +11,7 @@ export ROBOT_TCP_PORT=5006
 dt-launchfile-init
 
 # launch subscriber
-rosrun connection_bridge handshake_sub.py
+rosrun laptop_communication target_pose_receiver.py
 
 # wait for app to end
 dt-launchfile-join

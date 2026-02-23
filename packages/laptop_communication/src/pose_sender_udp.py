@@ -9,6 +9,17 @@ from duckietown.dtros import DTROS, NodeType
 
 
 class HandshakePublisherNode(DTROS):
+    """
+    Purpose:
+      Read robot pose from local ROS and send it to the laptop via UDP.
+
+    ROS topics used:
+    - publishers:
+      - none
+    - subscribers:
+      - /<vehicle>/pose_reader:
+        Pose estimated from wheel encoders on the robot.
+    """
     def __init__(self, node_name):
         super(HandshakePublisherNode, self).__init__(
             node_name=node_name,

@@ -8,9 +8,21 @@ from std_msgs.msg import Float64MultiArray
 
 
 class LaptopPoseReader:
+    """
+    Purpose:
+      Receive robot pose packets over UDP on the laptop and republish them as ROS topics.
 
+    ROS topics used:
+    - publishers:
+      - /laptop_pose_reader:
+        Shared topic with all received robot poses (useful for quick monitoring).
+      - /<vehicle>/laptop_pose_reader:
+        Per-vehicle namespaced pose topic for multi-robot use.
+    - subscribers:
+      - none
+    """
     def __init__(self):
-        rospy.init_node("laptop_pose_reader", anonymous=True)
+        rospy.init_node("pose_reader", anonymous=True)
         self._udp_ip = rospy.get_param("~udp_ip", "0.0.0.0")
         self._udp_port = int(rospy.get_param("~udp_port", 5005))
         self._default_topic = rospy.get_param("~pose_topic", "/laptop_pose_reader")

@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 
+"""
+Purpose:
+  Send target pose commands (x, y, theta) from laptop to robot over TCP.
+
+Transport:
+- TCP client to <robot-ip>:<robot-port>
+- Payload format: JSON line {"x": ..., "y": ..., "theta": ...}
+"""
+
 import argparse
 import json
 import socket

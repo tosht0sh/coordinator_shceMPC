@@ -8,6 +8,20 @@ from duckietown_msgs.msg import WheelEncoderStamped
 from std_msgs.msg import Float64MultiArray, String
 
 class WheelEncoderReaderNode(DTROS):
+    """
+    Purpose:
+      Estimate robot pose (x, y, theta) from left and right wheel encoder ticks.
+
+    ROS topics used:
+    - publishers:
+      - /<vehicle>/pose_reader:
+        Estimated robot pose as Float64MultiArray [x, y, theta].
+    - subscribers:
+      - /<vehicle>/left_wheel_encoder_node/tick:
+        Left wheel encoder ticks.
+      - /<vehicle>/right_wheel_encoder_node/tick:
+        Right wheel encoder ticks.
+    """
 
     def __init__(self, node_name):
         super(WheelEncoderReaderNode, self).__init__(
