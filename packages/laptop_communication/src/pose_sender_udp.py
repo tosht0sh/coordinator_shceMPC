@@ -26,7 +26,7 @@ class HandshakePublisherNode(DTROS):
             node_type=NodeType.GENERIC,
         )
         self._vehicle_name = os.environ['VEHICLE_NAME']
-        self._laptop_ip = os.getenv("LAPTOP_IP", "10.42.0.1")
+        self._laptop_ip = os.getenv("LAPTOP_IP", "192.168.1.197")
         self._laptop_port = int(os.getenv("LAPTOP_UDP_PORT", "5005"))
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 

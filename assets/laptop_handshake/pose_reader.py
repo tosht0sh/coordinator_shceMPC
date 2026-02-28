@@ -23,7 +23,7 @@ class LaptopPoseReader:
     """
     def __init__(self):
         rospy.init_node("pose_reader", anonymous=True)
-        self._udp_ip = rospy.get_param("~udp_ip", "0.0.0.0")
+        self._udp_ip = rospy.get_param("~udp_ip", "192.168.1.197")
         self._udp_port = int(rospy.get_param("~udp_port", 5005))
         self._default_topic = rospy.get_param("~pose_topic", "/laptop_pose_reader")
         self._pub_default = rospy.Publisher(self._default_topic, Float64MultiArray, queue_size=10)

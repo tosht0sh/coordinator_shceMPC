@@ -37,7 +37,7 @@ class TargetPoseTcpReceiverNode(DTROS):
         )
 
         vehicle = os.environ.get("VEHICLE_NAME", "duckiebot")
-        self._listen_ip = os.getenv("ROBOT_TCP_IP", "0.0.0.0")
+        self._listen_ip = os.getenv("ROBOT_TCP_IP", "192.168.1.197")
         self._listen_port = int(os.getenv("ROBOT_TCP_PORT", "5006"))
         self._target_pose = None
         self._current_x = None

@@ -5,7 +5,7 @@ source /environment.sh
 
 # Keep bot on its local ROS master.
 # UDP destination is configured with LAPTOP_IP / LAPTOP_UDP_PORT env vars.
-export LAPTOP_IP=10.42.0.1
+export LAPTOP_IP=192.168.1.197
 export LAPTOP_UDP_PORT=5005
 unset ROS_HOSTNAME
 
