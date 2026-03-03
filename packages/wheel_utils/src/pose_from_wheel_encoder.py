@@ -119,7 +119,7 @@ class WheelEncoderReaderNode(DTROS):
 
         
     def run(self):
-        rate = rospy.Rate(2)
+        rate = rospy.Rate(20)
 
         while not rospy.is_shutdown():
             if self._ticks_left is not None and self._ticks_right is not None:
