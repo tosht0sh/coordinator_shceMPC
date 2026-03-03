@@ -1,0 +1,11 @@
+/mpc_solver
+/.vscode
+/.mypy_cache
+/archived
+.venv/
+.idea/
+
+__pycache__
+
+draft.py
+/Demo/
