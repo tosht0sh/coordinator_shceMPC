@@ -10,16 +10,14 @@ Basic things to keep in mind are:
 
 The folder currently packages currently made are:
 
-1. Basic publisher-subscriber architecture.
-2. Wheel encoder and wheel control node.
-3. Imu reader node.
+1. Laptop communication node
+2. Wheel encoder and wheel control node
+3. Imu reader node
 
 ## TODOs:
 
-1. Make proper documentations for the bots with issues faced.
-2. Analyse if it is better to merge encoder and imu reading for position estimation. Use the correct one and make code for that.
-3. Make the ROS architecture such that ROSCORE is on laptop and robots run only particular nodes that it needs to.
-4. Implement MPC on the bot.
+1. Analyse how to fix SLIP issue in pose estimation, maybe use EKF or complementary filter
+2. Add proper clock for coordination
 
 ## Running ROSCORE on laptop
 
@@ -91,7 +89,29 @@ Since we already did all our installations on Ubuntu 22.04 which does not have s
     export ROS_IP=10.42.0.129
     ```
 
+
+## Communicatin between Laptop and Bots
+
+The communication of ROS on laptop and DTROS on duckiebots is not easy. The way DTROS works is that is has nodes for sensor data acquistion and wheel actuation. We need to use this to extract data. Using 2 ROSCORE(1 on laptop and 1 on the bots) makes it difficult to have a direct publisher-subscriber architecture for communication. Hence, we changed communication to be using networking protocols as follows:
+
+1. Sending data from duckiebot to laptop
     
+    To send data to the laptop, we use UDP protocol at a frequency of 20 Hz. This is because the laptop constantly needs to monitory the state of the robot, and if we do miss a few messages in between due to the UDP protocol, it will not impact the system too much. The code for sending the data can be found in `packages/laptop_communication/pose_sender_udp.py`. The launcher file to launch this script is `launchers/pose_send_to_lap.sh`.
+
+2. Sending commands form laptop to duckiebot
+
+    We will be sending essentially just the inputs for the trajectory to the bot. This can be done only when a new sequence has to be sent to the bot, or can be done at a much slower rate than state monitiring. So, we will be trigerring only when needed for now, but may change to 5-10 Hz if needed. This communication being secure is a requirement, we need to be sure that the new plan is sent to the bot in case of a change. To ensure this, we use a TCP protocol here. TCP protocol ensures that messages sent have been received. 
+    
+    For now, since the MPC is not ready, we just have a code where we ensure that for the given target pose, the robot reaches the desired x-coordinate of that pose. The code for sending the data can be found in `packages/laptop_communication/target_pose_receiver.py`. The launcher file to launch this script is `launchers/target_receiver.sh`.
+    
+
+## Common issues faced in communication
+
+1. Wi-Fi network
+
+2. ssh into bot
+
+3. Docker version
 
 
 

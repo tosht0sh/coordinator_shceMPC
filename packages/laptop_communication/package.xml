@@ -1,5 +1,5 @@
 <package>
-  <name>connection_bridge</name>
+  <name>laptop_communication</name>
   <version>0.0.1</version>
   <description>
   Hanshake between a and b
