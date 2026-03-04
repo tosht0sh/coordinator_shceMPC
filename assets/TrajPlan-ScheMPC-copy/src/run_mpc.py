@@ -52,6 +52,8 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     graph_path = os.path.join(data_dir, f"{EnvFolder}/graph.json")
     schedule_path = os.path.join(data_dir, "schedule.csv")
     start_path = os.path.join(data_dir, "robot_start.json")
+    # schedule_path = os.path.join(data_dir, "schedule_SingleRobot.csv")
+    # start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
     with open(start_path, "r") as f:
         robot_starts = json.load(f)
 
