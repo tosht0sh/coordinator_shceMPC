@@ -37,7 +37,8 @@ class TargetPoseTcpReceiverNode(DTROS):
         )
 
         vehicle = os.environ.get("VEHICLE_NAME", "duckiebot")
-        self._listen_ip = os.getenv("ROBOT_TCP_IP", "192.168.1.197")
+        self._listen_ip = os.getenv("ROBOT_TCP_IP", "192.168.1.225")
+        # self._listen_ip = os.getenv("ROBOT_TCP_IP", "192.168.1.111")
         self._listen_port = int(os.getenv("ROBOT_TCP_PORT", "5006"))
         self._target_pose = None
         self._current_x = None
@@ -134,14 +135,7 @@ class TargetPoseTcpReceiverNode(DTROS):
                             line = line.strip()
                             if not line:
                                 continue
-                            try:
-                                x, y, theta = self._parse_payload(line)
-                            except ValueError as e:
-                                rospy.logwarn_throttle(2.0, "Invalid payload: %s", e)
-                                continue
-                            self._target_pose = (x, y, theta)
-                            self._publisher.publish(Float64MultiArray(data=[x, y, theta]))
-                            rospy.loginfo("New target pose: %.3f, %.3f, %.3f", x, y, theta)
+                            rospy.loginfo("Received TCP payload: %s", line)
                 except BlockingIOError:
                     pass
                 except OSError:
