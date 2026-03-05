@@ -357,8 +357,8 @@ class CasadiNMPC:
             # Add acceleration penalty to the cost/objective function
             total_cost += self._q_terms["acc_penalty"] * acc**2 # ||u_k - u_k-1 || Qa
             total_cost += self._q_terms["w_acc_penalty"] * w_acc**2 # ||u_k - u_k-1 || Qa
-            total_cost +=  2 * ca.sum1(e_static_k)#1e2 * ca.sum1(e_static_k) + 1e4 * ca.sum1(e_static_k**2)
-            total_cost +=  1e2 * ca.sum1(e_dynamic_k)#1e2 * ca.sum1(e_dynamic_k) + 1e4 * ca.sum1(e_dynamic_k**2)
+            total_cost +=  ca.sum1(e_static_k)#1e2 * ca.sum1(e_static_k) + 1e4 * ca.sum1(e_static_k**2)
+            total_cost +=  ca.sum1(e_dynamic_k)#1e2 * ca.sum1(e_dynamic_k) + 1e4 * ca.sum1(e_dynamic_k**2)
             # total_cost += rho_stc * ca.sum1(e_static_k**2)
             # total_cost += rho_dyn * ca.sum1(e_dynamic_k**2)
 

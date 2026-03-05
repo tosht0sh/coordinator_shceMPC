@@ -19,6 +19,9 @@ from configs import CircularRobotSpecification
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
+import socket
+import time
+
 def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=False):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
@@ -52,6 +55,8 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     graph_path = os.path.join(data_dir, f"{EnvFolder}/graph.json")
     schedule_path = os.path.join(data_dir, "schedule.csv")
     start_path = os.path.join(data_dir, "robot_start.json")
+    # schedule_path = os.path.join(data_dir, "schedule_SingleRobot.csv")
+    # start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
     with open(start_path, "r") as f:
         robot_starts = json.load(f)
 
@@ -104,6 +109,12 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
 
     actual_timetable = {rid: [] for rid in robot_ids}
 
+    v = 0.0
+    w = 0.0
+    # tcp_port = 5006
+    # robot_ip = "192.168.1.196"
+    # with socket.create_connection((robot_ip, tcp_port), timeout=5.0) as sock:
+    # print(f"Streaming command pose at {robot_ip}:{tcp_port}.")
     for kt in range(TIMEOUT):
         robot_states = []
         incomplete = False
@@ -117,6 +128,8 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
 
             if controller.idle:
+                duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
+                sock.sendall(duck_payload.encode("utf-8"))
                 main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
                 continue
             
@@ -133,14 +146,24 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
                 (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
             else:
                 (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
-                                                           full_dyn_obstacle_list=None,
-                                                           other_robot_states=other_robot_states,
-                                                           map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+                                                            full_dyn_obstacle_list=None,
+                                                            other_robot_states=other_robot_states,
+                                                            map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
             
+            ############################################################################################################################
+            # DATA TO SEND TO BOTS
+            ############################################################################################################################
+            
+            # v = float(actions[-1][0]) # linear vel
+            # w = float(actions[-1][1]) # anglar vel
+            # duck_payload = json.dumps({"v": round(v, 3), "w": round(w, 3)}) + "\n"
+            # duck_data = duck_payload.encode("utf-8")
+            # sock.sendall(duck_data)
+
             controller.report_cost(debug_info['cost'],
-                                   debug_info['step_runtime'],
-                                   debug_info['monitored_cost'],
-                                   object_id=f"Robot {rid}")
+                                    debug_info['step_runtime'],
+                                    debug_info['monitored_cost'],
+                                    object_id=f"Robot {rid}")
 
             if not actual_timetable[rid] or actual_timetable[rid][-1][1] != gpc.get_node_id(planner._current_target_node):
                 actual_timetable[rid].append((kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node)))
