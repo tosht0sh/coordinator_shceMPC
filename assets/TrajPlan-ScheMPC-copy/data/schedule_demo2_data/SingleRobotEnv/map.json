@@ -1,4 +1,4 @@
 {
-  "boundary_coords": [[0,0],[8,0],[8,8],[0,8]],
+  "boundary_coords": [[0,0],[10,0],[10,10],[0,10]],
   "obstacle_list": []
 }

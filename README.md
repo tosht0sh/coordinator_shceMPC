@@ -109,9 +109,34 @@ The communication of ROS on laptop and DTROS on duckiebots is not easy. The way 
 
 1. Wi-Fi network
 
-2. ssh into bot
+    It is geerally an issue to connect to the right networks and getting things to work properly. If there is a new network to connect to, you should connect the duckiebot to a screen and keyboard and add credentials of the network by following the instructions below
+
+    a. Go to folder
+        
+        
+        cd /etc/
+        
+    b. Open the file
+
+        sudo nano wpa_supplicant.conf
+
+    c. Add the WiFi credentials as follows
+
+        network={
+            id_str="network_2" # wifi priority
+            ssid="WIFI_NAME"
+            psk="WIFI_PASSWORD"
+            key_mgmt=WPA-PSK
+        }
+
+
+2. SSH into the bot
+
+    Sometimes you might need to ssh into the bot. For that, run the command `ssh duckie@[DUCK_NAME].local`. The password is quackquack.
 
 3. Docker version
+
+    The docker verstion on the bots is too old for them to run the launchers. For this, there are two ways of tackling it. You can either update the docker on the bot, or you can use an older docker version on you laptop to run it. If you are doing the second way, it might be better to create an alias so that you do not have to type long commands repeatedly.
 
 
 
