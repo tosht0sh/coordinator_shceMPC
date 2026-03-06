@@ -19,8 +19,8 @@ from configs import CircularRobotSpecification
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
-import socket
-import time
+#import socket
+#import time
 
 def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=False):
 
@@ -128,8 +128,8 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
 
             if controller.idle:
-                duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
-                sock.sendall(duck_payload.encode("utf-8"))
+                #duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
+                #sock.sendall(duck_payload.encode("utf-8"))
                 main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
                 continue
             
