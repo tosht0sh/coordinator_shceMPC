@@ -53,10 +53,20 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     ### Map, graph, and schedule paths
     map_path = os.path.join(data_dir, f"{EnvFolder}/map.json")
     graph_path = os.path.join(data_dir, f"{EnvFolder}/graph.json")
-    schedule_path = os.path.join(data_dir, "schedule.csv")
-    start_path = os.path.join(data_dir, "robot_start.json")
+
+    # Load schedule of orignal problem
+    # schedule_path = os.path.join(data_dir, "schedule.csv")
+    # start_path = os.path.join(data_dir, "robot_start.json")
+
+    # Load schedule of SingleRobot
     # schedule_path = os.path.join(data_dir, "schedule_SingleRobot.csv")
     # start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
+
+    # Load schedule of TwoRobots
+    schedule_path = os.path.join(data_dir, "schedule_TwoRobots.csv")
+    start_path = os.path.join(data_dir, "robot_start_TwoRobots.json")
+
+    # Load schedule of TwoRobots
     with open(start_path, "r") as f:
         robot_starts = json.load(f)
 
