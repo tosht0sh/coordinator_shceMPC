@@ -2,6 +2,8 @@ import os
 import json
 import pathlib
 import datetime
+import socket
+import time
 
 import numpy as np
 import pandas as pd # type: ignore
@@ -19,8 +21,82 @@ from configs import CircularRobotSpecification
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
-#import socket
-#import time
+def _env_bool(name, default=False):
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _wrap_to_pi(theta):
+    return ((theta + np.pi) % (2 * np.pi)) - np.pi
+
+
+def _load_robot_vehicle_map():
+    raw_map = os.getenv("MPC_ROBOT_VEHICLE_MAP", "").strip()
+    if not raw_map:
+        return {}
+    try:
+        loaded = json.loads(raw_map)
+    except json.JSONDecodeError:
+        print("[MPC] MPC_ROBOT_VEHICLE_MAP is not valid JSON. Ignoring mapping.")
+        return {}
+
+    if not isinstance(loaded, dict):
+        print("[MPC] MPC_ROBOT_VEHICLE_MAP must be a JSON object. Ignoring mapping.")
+        return {}
+    return {str(k): str(v) for k, v in loaded.items()}
+
+
+class UdpPoseReceiver:
+    """Collect latest robot poses from UDP packets produced by pose_sender_udp."""
+    def __init__(self, bind_ip, bind_port, stale_timeout=0.5):
+        self._stale_timeout = max(0.0, float(stale_timeout))
+        self._latest_pose = {}
+        self._last_vehicle = None
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.bind((bind_ip, int(bind_port)))
+        self._sock.setblocking(False)
+
+    def poll(self, max_packets=64):
+        for _ in range(max_packets):
+            try:
+                packet, _ = self._sock.recvfrom(4096)
+            except BlockingIOError:
+                break
+            except OSError as e:
+                print(f"[MPC] UDP pose receive failed: {e}")
+                break
+
+            try:
+                data = json.loads(packet.decode("utf-8"))
+                vehicle = str(data["vehicle"])
+                x = float(data["x"])
+                y = float(data["y"])
+                theta = _wrap_to_pi(float(data["theta"]))
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+
+            self._latest_pose[vehicle] = (np.asarray([x, y, theta], dtype=float), time.monotonic())
+            self._last_vehicle = vehicle
+
+    def get_state(self, vehicle=None):
+        if not self._latest_pose:
+            return None
+
+        selected_vehicle = vehicle if vehicle in self._latest_pose else self._last_vehicle
+        if selected_vehicle is None:
+            return None
+
+        state, stamp = self._latest_pose[selected_vehicle]
+        age = time.monotonic() - stamp
+        if age > self._stale_timeout:
+            return None
+        return state.copy()
+
+    def close(self):
+        self._sock.close()
 
 def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=False):
 
@@ -31,6 +107,16 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = True
     TIMEOUT = 10000
+    # environment configs for UDP
+    USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) # To run simulation with simulated data
+    # keep USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) if you want to use real data from
+    # the robot use USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", True)
+    # or export MPC_USE_UDP_STATE=1
+    UDP_BIND_IP = os.getenv("MPC_UDP_BIND_IP", "0.0.0.0")
+    UDP_PORT = int(os.getenv("MPC_UDP_PORT", "5005"))
+    UDP_STATE_TIMEOUT = float(os.getenv("MPC_UDP_STATE_TIMEOUT", "0.5"))
+    DEFAULT_VEHICLE = os.getenv("MPC_DEFAULT_VEHICLE", "").strip() or None
+    robot_vehicle_map = _load_robot_vehicle_map()
 
     if recording:
         save_video_path = f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
@@ -118,6 +204,19 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
         visualizer.plot(main_plotter.map_ax, *robot.state)
 
     actual_timetable = {rid: [] for rid in robot_ids}
+    udp_state_reader = None
+    live_pose_announced = set()
+    missing_map_announced = set()
+
+    if USE_UDP_STATE:
+        try:
+            udp_state_reader = UdpPoseReceiver(UDP_BIND_IP, UDP_PORT, stale_timeout=UDP_STATE_TIMEOUT)
+            print(f"[MPC] Listening for UDP poses on {UDP_BIND_IP}:{UDP_PORT}")
+            if robot_vehicle_map:
+                print(f"[MPC] Robot to vehicle mapping: {robot_vehicle_map}")
+        except OSError as e:
+            print(f"[MPC] Failed to start UDP pose receiver ({e}). Falling back to simulated state.")
+            udp_state_reader = None
 
     v = 0.0
     w = 0.0
@@ -126,6 +225,8 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     # with socket.create_connection((robot_ip, tcp_port), timeout=5.0) as sock:
     # print(f"Streaming command pose at {robot_ip}:{tcp_port}.")
     for kt in range(TIMEOUT):
+        if udp_state_reader is not None:
+            udp_state_reader.poll()
         robot_states = []
         incomplete = False
         for i, rid in enumerate(robot_ids):
@@ -136,6 +237,26 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             controller = robot_manager.get_controller(rid)
             visualizer = robot_manager.get_visualizer(rid)
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
+            using_live_state = False
+
+            if udp_state_reader is not None:
+                mapped_vehicle = robot_vehicle_map.get(str(rid))
+                if mapped_vehicle is None:
+                    if len(robot_ids) == 1:
+                        mapped_vehicle = DEFAULT_VEHICLE
+                    elif rid not in missing_map_announced:
+                        print(f"[MPC] No vehicle mapping for robot '{rid}'. Using simulated state for this robot.")
+                        print("[MPC] Set MPC_ROBOT_VEHICLE_MAP, example: {\"A1\": \"duckiebot\"}")
+                        missing_map_announced.add(rid)
+
+                live_state = udp_state_reader.get_state(mapped_vehicle)
+                if live_state is not None:
+                    robot.set_state(live_state)
+                    using_live_state = True
+                    if rid not in live_pose_announced:
+                        source = mapped_vehicle if mapped_vehicle is not None else "latest UDP sender"
+                        print(f"[MPC] Using live pose for robot '{rid}' from '{source}'.")
+                        live_pose_announced.add(rid)
 
             if controller.idle:
                 #duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
@@ -152,6 +273,7 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
             controller.set_current_state(robot.state)
             controller.set_ref_states(ref_states, ref_speed=ref_speed)
+            print(f"Robot_state {robot.state[0]}" )
             if naive_tracker:
                 (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
             else:
@@ -163,9 +285,14 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             ############################################################################################################################
             # DATA TO SEND TO BOTS
             ############################################################################################################################
-            
+            # What to insert from the robot
+            # x = float(robot.state[0]) # x pos
+            # y = float(robot.state[1]) # y pos
+            # theta = float(robot.state[2]) # theta
+
             # v = float(actions[-1][0]) # linear vel
             # w = float(actions[-1][1]) # anglar vel
+
             # duck_payload = json.dumps({"v": round(v, 3), "w": round(w, 3)}) + "\n"
             # duck_data = duck_payload.encode("utf-8")
             # sock.sendall(duck_data)
@@ -181,7 +308,8 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
                 actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
 
             ### Real run
-            if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
+            # if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
+            if (not using_live_state) and (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
                 if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.8) or planner.idle:
                     robot.step(actions[-1])
             robot_manager.set_pred_states(rid, np.asarray(pred_states))
@@ -202,6 +330,8 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     main_plotter.show()
     input('Press anything to finish!')
     main_plotter.close()
+    if udp_state_reader is not None:
+        udp_state_reader.close()
 
     # Convert actual_timetable to DataFrame and save to CSV
     rows = []
