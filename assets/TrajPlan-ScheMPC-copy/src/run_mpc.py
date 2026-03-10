@@ -297,15 +297,15 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             # duck_data = duck_payload.encode("utf-8")
             # sock.sendall(duck_data)
 
-            controller.report_cost(debug_info['cost'],
-                                    debug_info['step_runtime'],
-                                    debug_info['monitored_cost'],
-                                    object_id=f"Robot {rid}")
+                controller.report_cost(debug_info['cost'],
+                                        debug_info['step_runtime'],
+                                        debug_info['monitored_cost'],
+                                        object_id=f"Robot {rid}")
 
-            if not actual_timetable[rid] or actual_timetable[rid][-1][1] != gpc.get_node_id(planner._current_target_node):
-                actual_timetable[rid].append((kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node)))
-            else: # overwrite the time
-                actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
+                if not actual_timetable[rid] or actual_timetable[rid][-1][1] != gpc.get_node_id(planner._current_target_node):
+                    actual_timetable[rid].append((kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node)))
+                else: # overwrite the time
+                    actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
 
             ### Real run
             # if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
@@ -320,11 +320,11 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             if not controller.check_termination_condition(external_check=planner.idle):
                 incomplete = True
 
-            robot_states.append(robot.state)
+                robot_states.append(robot.state)
 
-        main_plotter.plot_in_loop(time=kt*config_mpc.ts, autorun=AUTORUN, zoom_in=None)
-        if not incomplete:
-            break
+            main_plotter.plot_in_loop(time=kt*config_mpc.ts, autorun=AUTORUN, zoom_in=None)
+            if not incomplete:
+                break
 
 
     main_plotter.show()

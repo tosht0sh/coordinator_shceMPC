@@ -6,12 +6,15 @@ import socket
 import rospy
 from duckietown.dtros import DTROS, NodeType
 from std_msgs.msg import Float64MultiArray
-from duckietown_msgs.msg import WheelsCmdStamped
+from duckietown_msgs.msg import WheelsCmdStamped, Twist2DStamped
 
-THROTTLE_LEFT = 0.1
-THROTTLE_RIGHT = 0.1
-CONTROL_HZ = 20
-TARGET_EPS = 1e-3
+# THROTTLE_LEFT = 0.1
+# THROTTLE_RIGHT = 0.1
+# CONTROL_HZ = 20
+# TARGET_EPS = 1e-3
+
+V_MAX = 1.5
+W_MAX = 0.5
 
 
 class TargetPoseTcpReceiverNode(DTROS):
@@ -36,64 +39,60 @@ class TargetPoseTcpReceiverNode(DTROS):
             node_type=NodeType.GENERIC,
         )
 
-        vehicle = os.environ.get("VEHICLE_NAME", "duckiebot")
-        self._listen_ip = os.getenv("ROBOT_TCP_IP", "192.168.1.225")
-        # self._listen_ip = os.getenv("ROBOT_TCP_IP", "192.168.1.111")
-        self._listen_port = int(os.getenv("ROBOT_TCP_PORT", "5006"))
-        self._target_pose = None
-        self._current_x = None
-        self._moving = False
-
-        self.pose_sub = rospy.Subscriber(
-            f"/{vehicle}/pose_reader", Float64MultiArray, self.callback_pose_reader, queue_size=10
-        )
+        self._rate = 10 # Hz
+        vehicle_name = os.environ.get("VEHICLE_NAME", "duckiebot")
+        self._axis_length = rospy.get_param("axis_length", 0.09716)
 
         # TODO: maybe this publisher is not sensible
-        self._publisher = rospy.Publisher(
-            f"/{vehicle}/laptop_pose_cmd", Float64MultiArray, queue_size=10
-        )
+        wheels_topic = f"/{vehicle_name}/wheels_driver_node/wheels_cmd"
+        self._publisher = rospy.Publisher(wheels_topic, WheelsCmdStamped, queue_size=10)
 
-        wheels_topic = f"/{vehicle}/wheels_driver_node/wheels_cmd"
-        self.wheel_publisher = rospy.Publisher(wheels_topic, WheelsCmdStamped, queue_size=1)
+        # kinematic nodes subscriber
+        twist_topic  = f"/{vehicle_name}/car_cmd_switch_node/cmd"
+        self._twist_publisher = rospy.Publisher(twist_topic, Twist2DStamped, queue_size=1)
+        self._twist_subscriber = rospy.Subscriber("/duckiebot/kinematics_node/velocity", Twist2DStamped, cb)
 
-    def callback_pose_reader(self, msg):
-        if len(msg.data) < 1:
-            return
-        self._current_x = float(msg.data[0])
+        # communication nodes
+        self._listen_ip = os.getenv("ROBOT_TCP_IP", "192.168.1.197") # for CASELAB wifi
+        # self._listen_ip = "10.42.0.129" # for laptop hotspot
+        self._listen_port = int(os.getenv("ROBOT_TCP_PORT", "5006"))
+        
+        # velocities to be published
+        self.target_v = 0.0
+        self.target_w = 0.0
 
-    def _publish_motion(self, left, right):
-        self.wheel_publisher.publish(WheelsCmdStamped(vel_left=left, vel_right=right))
-
-    def _update_control(self):
-        if self._target_pose is None or self._current_x is None:
-            if self._moving:
-                self._publish_motion(0.0, 0.0)
-                self._moving = False
-            return
-
-        target_x = self._target_pose[0]
-        if self._current_x < (target_x - TARGET_EPS):
-            self._publish_motion(THROTTLE_LEFT, THROTTLE_RIGHT)
-            self._moving = True
-        else:
-            if self._moving:
-                self._publish_motion(0.0, 0.0)
-                self._moving = False
+        self.first_command = True
+        self.last_msg_time = 0.0
+        
 
     def _parse_payload(self, raw):
         """
-        Parse target pose from either JSON ({"x":..,"y":..,"theta":..}) or
-        a CSV string "x,y,theta".
+        Parse target pose from either JSON ({"v":..,"w":..,}) 
         """
         
-        try:
-            data = json.loads(raw)
-            return float(data["x"]), float(data["y"]), float(data["theta"])
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            parts = [p.strip() for p in raw.split(",")]
-            if len(parts) != 3:
-                raise ValueError("Payload must be JSON or x,y,theta")
-            return float(parts[0]), float(parts[1]), float(parts[2])
+        # try:
+        data = json.loads(raw)
+        return float(data["v"]), float(data["w"])
+        # except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        #     parts = [p.strip() for p in raw.split(",")]
+        #     if len(parts) != 3:
+        #         raise ValueError("Payload must be JSON or x,y,theta")
+        #     return float(parts[0]), float(parts[1]), float(parts[2])
+
+    def _wheel_control(self):
+        # vel_left = self.target_v - ((self._axis_length / 2) * self.target_w)
+        # vel_right = self.target_v + ((self._axis_length / 2) * self.target_w)
+
+        # vel_left_cmd = vel_left / V_MAX
+        # vel_right_cmd = vel_right / V_MAX
+
+        message = Twist2DStamped(
+            v=self.target_v,
+            omega=self.target_w * 1.5
+            )
+        self._twist_publisher.publish(message)
+
+
 
     def run(self):
         # TCP connection to receive target coordinate form laptop.
@@ -107,7 +106,7 @@ class TargetPoseTcpReceiverNode(DTROS):
         
         conn = None         # to check connection on or not
         buffer = ""         # input stream buffer
-        rate = rospy.Rate(CONTROL_HZ)
+        rate = rospy.Rate(self._rate)
 
         while not rospy.is_shutdown():
             # setup connection
@@ -130,22 +129,47 @@ class TargetPoseTcpReceiverNode(DTROS):
                         conn = None
                     else:
                         buffer += chunk.decode("utf-8")
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-                            if not line:
-                                continue
-                            rospy.loginfo("Received TCP payload: %s", line)
+                        if self.first_command:
+                            self.first_command = False
+                        else:
+                            while "\n" in buffer:
+                                line, buffer = buffer.split("\n", 1)
+                                line = line.strip()
+                                
+                                if not line:
+                                    continue
+
+                                try:
+                                    self.target_v, self.target_w = self._parse_payload(line)
+                                    self.last_msg_time = rospy.get_time()
+                                    rospy.loginfo(f"Linear velocity: {self.target_v}, Angular Velocity: {self.target_w}")
+                                except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                                    rospy.logwarn(f"Could not parse data.")
+
                 except BlockingIOError:
                     pass
                 except OSError:
                     conn = None
 
-            self._update_control()
+            now = rospy.get_time()
+            if self.last_msg_time > 0.0 and (now - self.last_msg_time) > 5.0:
+                rospy.logwarn_throttle(
+                    1.0,
+                    "Time exceeded: last control received %.2f s ago",
+                    now - self.last_msg_time,
+                )
+                self.target_v = 0.0
+                self.target_w = 0.0
+                self.first_command = True
+                self.last_msg_time = 0.0
+
+            self._wheel_control()
             rate.sleep()
 
     def on_shutdown(self):
-        self._publish_motion(0.0, 0.0)
+        self.target_v = 0.0
+        self.target_w = 0.0
+        self._wheel_control()
 
 
 if __name__ == '__main__':
