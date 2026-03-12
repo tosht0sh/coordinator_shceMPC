@@ -4,8 +4,9 @@ import os
 import math
 import rospy
 from duckietown.dtros import DTROS, NodeType
-from duckietown_msgs.msg import WheelEncoderStamped, Pose2DStamped
+from duckietown_msgs.msg import WheelEncoderStamped, Pose2DStamped, Twist2DStamped
 from std_msgs.msg import Float64MultiArray, String
+from sensor_msgs.msg import Imu
 
 # laptop - 192.168.1.197
 
@@ -90,6 +91,30 @@ class WheelEncoderReaderNode(DTROS):
         self.vtp_y_origin = None
         self.vtp_theta_origin = None
 
+
+        # imu settings
+        self._imu_reader_topic = f"/duck1/imu_node/data"
+
+        self._ang_vel = None
+
+        self._imu_subscirber = rospy.Subscriber(self._imu_reader_topic, Imu, self.callback_imu)
+
+        # kinematics node pose 
+        self._vel_reader_topic = f"/duck1/kinematics_node/velocity"
+
+        self._lin_vel_kn = None
+        self._ang_vel_kn = None
+
+        self._kin_node_subscirber = rospy.Subscriber(self._vel_reader_topic, Twist2DStamped, self.callback_kn)
+
+    def callback_kn(self, msg):
+        self._lin_vel_kn = msg.v
+        self._ang_vel_kn = msg.omega
+
+
+    def callback_imu(self, msg):
+        self._ang_vel = msg.angular_velocity.z
+
     def callback_left(self, data):
         rospy.loginfo_once(f"Left encoder resolution: {data.resolution}")
         rospy.loginfo_once(f"Left encoder type: {data.type}")
@@ -145,7 +170,7 @@ class WheelEncoderReaderNode(DTROS):
 
         self.x += d * math.cos(self.theta + dtheta / 2)
         self.y += d * math.sin(self.theta + dtheta / 2)
-        self.theta += (dtheta * 2.0)
+        self.theta += (dtheta * 1.85)
         # Keep heading bounded to [-pi, pi] for symmetric CW/CCW comparison.
         self.theta = (self.theta + math.pi) % (2 * math.pi) - math.pi
 
@@ -155,10 +180,11 @@ class WheelEncoderReaderNode(DTROS):
 
         
     def run(self):
-        rate = rospy.Rate(2)
+        rate = rospy.Rate(10)
 
         while not rospy.is_shutdown():
-            
+
+            # print(f"Ticks left, Ticks Right: {self._ticks_left}, {self._ticks_right}")            
             if self._ticks_left is not None and self._ticks_right is not None:
 
                 self.position_calc()
@@ -166,8 +192,17 @@ class WheelEncoderReaderNode(DTROS):
                 msg = (
                     f"Encoder pose [x, y, theta]: "
                     f"{self.x:.3f}, {self.y:.3f}, {self.theta:.3f} | "
-                    f"Velocity pose (relative) [x, y, theta]: "
-                    f"{self.vtp_x:.3f}, {self.vtp_y:.3f}, {self.vtp_theta:.3f}"
+                    # f"Velocity pose (relative) [x, y, theta]: "
+                    # f"{self.vtp_x:.3f}, {self.vtp_y:.3f}, {self.vtp_theta:.3f}"
+                    # f"Angular Velocity (x,y,z): "
+                    # f"({self._ang_vel.x:.3f}, {self._ang_vel.y:.3f}, {self._ang_vel.z:.3f}) | "
+                    # f"Linear Acceleration (x,y,z): "
+                    # f"({self._lin_acc.x:.3f}, {self._lin_acc.y:.3f}, {self._lin_acc.z:.3f})"
+                    f"Imu (angular velocity): "
+                    f"({self._ang_vel:.3f}) |"
+                    f"Kinematics Node (v, omega): "
+                    f"[{self._lin_vel_kn:.3f}, {self._ang_vel_kn:.3f}]"
+                    
                 )
                 rospy.loginfo(msg)
                 pose_msg = Float64MultiArray(data=[round(self.x, 3), round(self.y, 3), round(self.theta, 3)])
