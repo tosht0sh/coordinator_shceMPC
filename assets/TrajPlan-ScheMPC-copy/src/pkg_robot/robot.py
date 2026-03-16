@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import numpy as np
 
@@ -8,7 +8,15 @@ from configs import CircularRobotSpecification, MpcConfiguration
 # Type hinting
 from pkg_mpc_tracker.trajectory_tracker import TrajectoryTracker
 from pkg_motion_plan.local_traj_plan import LocalTrajPlanner
-from visualizer.object import ObjectVisualizer
+# When mpc, scheduler and planner on laptop.
+# from visualizer.object import ObjectVisualizer
+
+# MPC on bot:
+
+if TYPE_CHECKING:
+    from visualizer.object import ObjectVisualizer
+else:
+    ObjectVisualizer = Any
 
 
 MAX_NUMBER_OF_ROBOTS = 10
@@ -64,9 +72,10 @@ class Robot:
         self._state = self.motion_model(self._state, action)
 
 
+# Change to RobotUnit() class, last parameter was visualizer: ObjectVisualizer, changed to Any
 class RobotUnit():
     """A robot unit is a dictionary-like object that contains a robot, a controller, a visualizer, and a reference path."""
-    def __init__(self, robot: Robot, controller: TrajectoryTracker, planner: LocalTrajPlanner, visualizer: ObjectVisualizer) -> None:
+    def __init__(self, robot: Robot, controller: TrajectoryTracker, planner: LocalTrajPlanner, visualizer: Any) -> None:
         self.robot = robot
         self.controller = controller
         self.planner = planner
@@ -123,7 +132,8 @@ class RobotManager():
         robot = Robot(config, motion_model, id_, name)
         return robot
 
-    def add_robot(self, robot: Robot, controller: TrajectoryTracker, planner: LocalTrajPlanner, visualizer: ObjectVisualizer) -> None:
+    # Last argument was visualizer: ObjectVisualizer, now Any
+    def add_robot(self, robot: Robot, controller: TrajectoryTracker, planner: LocalTrajPlanner, visualizer: Any) -> None:
         if robot.id_ in self.ROBOT_ID_LIST:
             raise ValueError(f'Robot {robot.id_} exists! Cannot add it again.')
         self._robot_dict[robot.id_] = RobotUnit(robot, controller, planner, visualizer)

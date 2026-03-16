@@ -1,0 +1,10 @@
+{
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/assets/TrajPlan-ScheMPC-copy/src",
+    "${workspaceFolder}/packages/mpc_runtime/src"
+  ],
+  "python.autoComplete.extraPaths": [
+    "${workspaceFolder}/assets/TrajPlan-ScheMPC-copy/src",
+    "${workspaceFolder}/packages/mpc_runtime/src"
+  ]
+}

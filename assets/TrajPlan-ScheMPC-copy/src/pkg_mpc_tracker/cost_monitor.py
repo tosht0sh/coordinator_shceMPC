@@ -1,13 +1,17 @@
-from typing import Callable, Optional, TypedDict
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypedDict
 from timeit import default_timer as timer
 
 import casadi as ca # type: ignore
 
 from .casadi_build import mpc_cost as mc
-from .casadi_build.builder_panoc import PanocBuilder, PenaltyTerms
 from .casadi_build.mpc_cost import CostTerms
 
 from configs import MpcConfiguration, CircularRobotSpecification
+
+# Original module-scope import kept for reference. It pulls in OpenGEN immediately.
+# from .casadi_build.builder_panoc import PanocBuilder, PenaltyTerms
+if TYPE_CHECKING:
+    from .casadi_build.builder_panoc import PanocBuilder
 
 
 class MonitoredCost(TypedDict):
@@ -29,7 +33,16 @@ class CostMonitor:
         self._spec = robot_config
         self.vb = verbose
 
-        self._builder = PanocBuilder(self._cfg, self._spec)
+        # Original eager PANOC builder construction kept for reference.
+        # self._builder = PanocBuilder(self._cfg, self._spec)
+        try:
+            from .casadi_build.builder_panoc import PanocBuilder
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "CostMonitor requires PANOC/OpenGEN components, which are disabled or unavailable in this runtime."
+            ) from exc
+
+        self._builder: "PanocBuilder" = PanocBuilder(self._cfg, self._spec)
         self.init_params()
 
     def init_params(self):
@@ -80,18 +93,31 @@ class CostMonitor:
             accumulative_len += param_len
         self._u = ca.SX(new_actions)
 
-        self._q_terms = PenaltyTerms(
-            pos=self._q[0], 
-            vel=self._q[1], 
-            theta=self._q[2], 
-            v=self._q[3], 
-            w=self._q[4],
-            posN=self._q[5], 
-            thetaN=self._q[6], 
-            rpd=self._q[7],
-            acc_penalty=self._q[8], 
-            w_acc_penalty=self._q[9]
-        )
+        # Original typed-dict helper kept for reference.
+        # self._q_terms = PenaltyTerms(
+        #     pos=self._q[0],
+        #     vel=self._q[1],
+        #     theta=self._q[2],
+        #     v=self._q[3],
+        #     w=self._q[4],
+        #     posN=self._q[5],
+        #     thetaN=self._q[6],
+        #     rpd=self._q[7],
+        #     acc_penalty=self._q[8],
+        #     w_acc_penalty=self._q[9]
+        # )
+        self._q_terms: dict[str, Any] = {
+            'pos': self._q[0],
+            'vel': self._q[1],
+            'theta': self._q[2],
+            'v': self._q[3],
+            'w': self._q[4],
+            'posN': self._q[5],
+            'thetaN': self._q[6],
+            'rpd': self._q[7],
+            'acc_penalty': self._q[8],
+            'w_acc_penalty': self._q[9],
+        }
 
         self.ref_states = ca.reshape(self._r_s, (self._cfg.ns, self._cfg.N_hor))
         self.ref_states = ca.horzcat(self.ref_states, self.ref_states[:,[-1]])[:2, :]
