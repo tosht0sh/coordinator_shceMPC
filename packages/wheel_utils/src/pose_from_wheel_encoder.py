@@ -53,9 +53,9 @@ class WheelEncoderReaderNode(DTROS):
         self.rate = 30
         self.dt = 1 / self.rate
 
-        # Geometry/calibration (override via ROS params if needed).
         self._wheel_radius = 0.0318
         self._axis_length = 0.1
+
         # self.first_callback = True
         self.left_enc_resolution = None
         self.left_meters_per_tick = None
@@ -146,6 +146,21 @@ class WheelEncoderReaderNode(DTROS):
         if self.right_enc_resolution is None:
             self.right_enc_resolution = data.resolution
             self.right_meters_per_tick = (2 * math.pi * self._wheel_radius) / self.right_enc_resolution
+
+    def callback_vel_to_pose(self, data):
+        self.vtp_x_actual = data.x
+        self.vtp_y_actual = data.y
+        self.vtp_theta_actual = data.theta
+
+        if self.vtp_x_origin is None:
+            self.vtp_x_origin = data.x
+            self.vtp_y_origin = data.y
+            self.vtp_theta_origin = data.theta
+
+        self.vtp_x = self.vtp_x_actual - self.vtp_x_origin
+        self.vtp_y = self.vtp_y_actual - self.vtp_y_origin
+        self.vtp_theta = self.vtp_theta_actual - self.vtp_theta_origin
+        self.vtp_theta = (self.vtp_theta + math.pi) % (2 * math.pi) - math.pi
 
     def position_calc(self):
 

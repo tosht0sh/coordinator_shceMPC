@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import casadi.casadi as cs # type: ignore
 
 

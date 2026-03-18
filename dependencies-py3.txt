@@ -1,2 +1,6 @@
-# LIST YOUR PYTHON3 PACKAGES HERE
-# NOTE: only place non-Duckietown libraries here; pin versions only if necessary
+# Python packages installed with pip for the Duckiebot image.
+# Keep this list minimal and reserve it for packages not reliably provided by apt.
+# Laptop-only tools such as plotting, pandas, OpenCV, gurobi, and opengen
+# should stay out of the bot image unless they are truly required at runtime.
+
+casadi==3.7.2
