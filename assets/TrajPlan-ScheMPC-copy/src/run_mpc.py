@@ -108,11 +108,11 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     TIMEOUT = 10000
 
     # environment configs for UDP
-    USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) # To run simulation with simulated data
+    USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", True) # To run simulation with simulated data
     # keep USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) if you want to use real data from
     # the robot use USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", True)
     # or export MPC_USE_UDP_STATE=1
-    UDP_BIND_IP = os.getenv("MPC_UDP_BIND_IP", "0.0.0.0")
+    UDP_BIND_IP = os.getenv("MPC_UDP_BIND_IP", "192.168.1.192")
     UDP_PORT = int(os.getenv("MPC_UDP_PORT", "5005"))
     UDP_STATE_TIMEOUT = float(os.getenv("MPC_UDP_STATE_TIMEOUT", "0.5"))
     DEFAULT_VEHICLE = os.getenv("MPC_DEFAULT_VEHICLE", "").strip() or None
@@ -208,6 +208,7 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     udp_state_reader = None
     live_pose_announced = set()
     missing_map_announced = set()
+    idle_stop_sent = set()      # to stop idle state sending 0 speed multiple times
 
     if USE_UDP_STATE:
         try:
@@ -224,8 +225,9 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     v = 0.0
     w = 0.0
     tcp_port = 5006
-    robot_ip = "192.168.1.197" # for CASELAB wifi
+    robot_ip = "192.168.1.225" # for CASELAB wifi
     # robot_ip = "10.42.0.129" # for laptop hotspot
+    # COUNTER = 0
 
     with socket.create_connection((robot_ip, tcp_port), timeout=5.0) as sock:
         print(f"Streaming command pose at {robot_ip}:{tcp_port}.")
@@ -265,10 +267,16 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
                             live_pose_announced.add(rid)
 
                 if controller.idle:
-                    duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
-                    sock.sendall(duck_payload.encode("utf-8"))
+                    if rid not in idle_stop_sent:
+                        duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
+                        # COUNTER += 1
+                        # print(f"Stopping condition reached, {COUNTER}")
+                        sock.sendall(duck_payload.encode("utf-8"))
+                        idle_stop_sent.add(rid)
                     main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
                     continue
+
+                idle_stop_sent.discard(rid)
                 
                 ref_states, ref_speed, *_ = planner.get_local_ref(
                     kt*config_mpc.ts, 

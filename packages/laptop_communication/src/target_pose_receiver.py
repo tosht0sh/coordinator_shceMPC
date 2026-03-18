@@ -39,7 +39,7 @@ class TargetPoseTcpReceiverNode(DTROS):
             node_type=NodeType.GENERIC,
         )
 
-        self._rate = 10 # Hz
+        self._rate = 20 # Hz
         vehicle_name = os.environ.get("VEHICLE_NAME", "duckiebot")
         self._axis_length = rospy.get_param("axis_length", 0.09716)
 
@@ -50,10 +50,10 @@ class TargetPoseTcpReceiverNode(DTROS):
         # kinematic nodes subscriber
         twist_topic  = f"/{vehicle_name}/car_cmd_switch_node/cmd"
         self._twist_publisher = rospy.Publisher(twist_topic, Twist2DStamped, queue_size=1)
-        self._twist_subscriber = rospy.Subscriber("/duckiebot/kinematics_node/velocity", Twist2DStamped, cb)
+        # self._twist_subscriber = rospy.Subscriber("/duckiebot/kinematics_node/velocity", Twist2DStamped, cb)
 
         # communication nodes
-        self._listen_ip = os.getenv("ROBOT_TCP_IP", "192.168.1.197") # for CASELAB wifi
+        self._listen_ip = os.getenv("ROBOT_TCP_IP", "192.168.1.225") # for CASELAB wifi
         # self._listen_ip = "10.42.0.129" # for laptop hotspot
         self._listen_port = int(os.getenv("ROBOT_TCP_PORT", "5006"))
         
