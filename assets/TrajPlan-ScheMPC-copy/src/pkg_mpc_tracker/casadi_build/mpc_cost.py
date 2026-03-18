@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Union
 
@@ -124,7 +126,6 @@ def cost_refpath_deviation(state: ca.SX, line_segments: ca.SX, weight:Union[ca.S
     cost:ca.SX = ca.mmin(distances_sqrt[1:]) * weight
     assert cost.shape == (1,1)
     return cost
-
 
 
 

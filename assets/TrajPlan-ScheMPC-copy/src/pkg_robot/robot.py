@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any, Optional, TYPE_CHECKING
 
 import numpy as np
@@ -110,7 +112,6 @@ class RobotManager():
     def __call__(self, robot_id) -> RobotUnit:
         return self._robot_dict[robot_id]
     
-    @staticmethod
     def _check_id(f): 
         """Decorator to check if robot_id exists"""
         def wrapper(self, robot_id, *args, **kwargs):

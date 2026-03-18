@@ -108,14 +108,14 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     TIMEOUT = 10000
 
     # environment configs for UDP
-    USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) # To run simulation with simulated data
+    #USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) # To run simulation with simulated data
     # keep USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) if you want to use real data from
     # the robot use USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", True)
     # or export MPC_USE_UDP_STATE=1
-    UDP_BIND_IP = os.getenv("MPC_UDP_BIND_IP", "0.0.0.0")
-    UDP_PORT = int(os.getenv("MPC_UDP_PORT", "5005"))
-    UDP_STATE_TIMEOUT = float(os.getenv("MPC_UDP_STATE_TIMEOUT", "0.5"))
-    DEFAULT_VEHICLE = os.getenv("MPC_DEFAULT_VEHICLE", "").strip() or None
+    # UDP_BIND_IP = os.getenv("MPC_UDP_BIND_IP", "0.0.0.0")
+    # UDP_PORT = int(os.getenv("MPC_UDP_PORT", "5005"))
+    # UDP_STATE_TIMEOUT = float(os.getenv("MPC_UDP_STATE_TIMEOUT", "0.5"))
+    # DEFAULT_VEHICLE = os.getenv("MPC_DEFAULT_VEHICLE", "").strip() or None
     
     robot_vehicle_map = _load_robot_vehicle_map() # TODO: what is this line doing exactly?
 
@@ -209,130 +209,130 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     live_pose_announced = set()
     missing_map_announced = set()
 
-    if USE_UDP_STATE:
-        try:
-            udp_state_reader = UdpPoseReceiver(UDP_BIND_IP, UDP_PORT, stale_timeout=UDP_STATE_TIMEOUT)
-            print(f"[MPC] Listening for UDP poses on {UDP_BIND_IP}:{UDP_PORT}")
-            if robot_vehicle_map:
-                print(f"[MPC] Robot to vehicle mapping: {robot_vehicle_map}")
-        except OSError as e:
-            print(f"[MPC] Failed to start UDP pose receiver ({e}). Falling back to simulated state.")
-            udp_state_reader = None
+    # if USE_UDP_STATE:
+    #     try:
+    #         udp_state_reader = UdpPoseReceiver(UDP_BIND_IP, UDP_PORT, stale_timeout=UDP_STATE_TIMEOUT)
+    #         print(f"[MPC] Listening for UDP poses on {UDP_BIND_IP}:{UDP_PORT}")
+    #         if robot_vehicle_map:
+    #             print(f"[MPC] Robot to vehicle mapping: {robot_vehicle_map}")
+    #     except OSError as e:
+    #         print(f"[MPC] Failed to start UDP pose receiver ({e}). Falling back to simulated state.")
+    #         udp_state_reader = None
 
     
     ## command action sending variables + socket settings
-    v = 0.0
-    w = 0.0
-    tcp_port = 5006
-    robot_ip = "192.168.1.197" # for CASELAB wifi
-    # robot_ip = "10.42.0.129" # for laptop hotspot
+    # v = 0.0
+    # w = 0.0
+    # tcp_port = 5006
+    # robot_ip = "192.168.1.197" # for CASELAB wifi
+    # # robot_ip = "10.42.0.129" # for laptop hotspot
 
-    with socket.create_connection((robot_ip, tcp_port), timeout=5.0) as sock:
-        print(f"Streaming command pose at {robot_ip}:{tcp_port}.")
+    # with socket.create_connection((robot_ip, tcp_port), timeout=5.0) as sock:
+    #     print(f"Streaming command pose at {robot_ip}:{tcp_port}.")
 
-        for kt in range(TIMEOUT):
-            if udp_state_reader is not None:
-                udp_state_reader.poll()
-            robot_states = []
-            incomplete = False
-            for i, rid in enumerate(robot_ids):
-                # if rid != 'A1':
-                #     continue
-                robot = robot_manager.get_robot(rid)
-                planner = robot_manager.get_planner(rid)
-                controller = robot_manager.get_controller(rid)
-                visualizer = robot_manager.get_visualizer(rid)
-                other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
-                using_live_state = False
+    for kt in range(TIMEOUT):
+        if udp_state_reader is not None:
+            udp_state_reader.poll()
+        robot_states = []
+        incomplete = False
+        for i, rid in enumerate(robot_ids):
+            # if rid != 'A1':
+            #     continue
+            robot = robot_manager.get_robot(rid)
+            planner = robot_manager.get_planner(rid)
+            controller = robot_manager.get_controller(rid)
+            visualizer = robot_manager.get_visualizer(rid)
+            other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
+            using_live_state = False
 
-                if udp_state_reader is not None:
-                    mapped_vehicle = robot_vehicle_map.get(str(rid))
-                    if mapped_vehicle is None:
-                        if len(robot_ids) == 1:
-                            mapped_vehicle = DEFAULT_VEHICLE
-                        elif rid not in missing_map_announced:
-                            print(f"[MPC] No vehicle mapping for robot '{rid}'. Using simulated state for this robot.")
-                            print("[MPC] Set MPC_ROBOT_VEHICLE_MAP, example: {\"A1\": \"duckiebot\"}")
-                            missing_map_announced.add(rid)
+            # if udp_state_reader is not None:
+            #     mapped_vehicle = robot_vehicle_map.get(str(rid))
+            #     if mapped_vehicle is None:
+            #         if len(robot_ids) == 1:
+            #             mapped_vehicle = DEFAULT_VEHICLE
+            #         elif rid not in missing_map_announced:
+            #             print(f"[MPC] No vehicle mapping for robot '{rid}'. Using simulated state for this robot.")
+            #             print("[MPC] Set MPC_ROBOT_VEHICLE_MAP, example: {\"A1\": \"duckiebot\"}")
+            #             missing_map_announced.add(rid)
 
-                    live_state = udp_state_reader.get_state(mapped_vehicle)
-                    if live_state is not None:
-                        robot.set_state(live_state)
-                        using_live_state = True
-                        if rid not in live_pose_announced:
-                            source = mapped_vehicle if mapped_vehicle is not None else "latest UDP sender"
-                            print(f"[MPC] Using live pose for robot '{rid}' from '{source}'.")
-                            live_pose_announced.add(rid)
+            #     live_state = udp_state_reader.get_state(mapped_vehicle)
+            #     if live_state is not None:
+            #         robot.set_state(live_state)
+            #         using_live_state = True
+            #         if rid not in live_pose_announced:
+            #             source = mapped_vehicle if mapped_vehicle is not None else "latest UDP sender"
+            #             print(f"[MPC] Using live pose for robot '{rid}' from '{source}'.")
+            #             live_pose_announced.add(rid)
 
-                if controller.idle:
-                    duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
-                    sock.sendall(duck_payload.encode("utf-8"))
-                    main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
-                    continue
-                
-                ref_states, ref_speed, *_ = planner.get_local_ref(
-                    kt*config_mpc.ts, 
-                    (float(robot.state[0]), float(robot.state[1])), 
-                    idx_check_range=5,
-                    ignore_speed_ref=ignore_speed_ref
-                )
+            if controller.idle:
+                duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
+                #sock.sendall(duck_payload.encode("utf-8"))
+                main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
+                continue
+            
+            ref_states, ref_speed, *_ = planner.get_local_ref(
+                kt*config_mpc.ts, 
+                (float(robot.state[0]), float(robot.state[1])), 
+                idx_check_range=5,
+                ignore_speed_ref=ignore_speed_ref
+            )
 
-                print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
-                controller.set_current_state(robot.state)
-                controller.set_ref_states(ref_states, ref_speed=ref_speed)
-                print(f"Robot_state {robot.state[0]}" )
-                
-                if naive_tracker:
-                    (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
-                else:
-                    (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
-                                                                full_dyn_obstacle_list=None,
-                                                                other_robot_states=other_robot_states,
-                                                                map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
-                
-                ############################################################################################################################
-                # DATA TO SEND TO BOTS
-                ############################################################################################################################
-                # What to insert from the robot
-                # x = float(robot.state[0]) # x pos
-                # y = float(robot.state[1]) # y pos
-                # theta = float(robot.state[2]) # theta
+            print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
+            controller.set_current_state(robot.state)
+            controller.set_ref_states(ref_states, ref_speed=ref_speed)
+            print(f"Robot_state {robot.state[0]}" )
+            
+            if naive_tracker:
+                (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+            else:
+                (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
+                                                            full_dyn_obstacle_list=None,
+                                                            other_robot_states=other_robot_states,
+                                                            map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+            
+            ############################################################################################################################
+            # DATA TO SEND TO BOTS
+            ############################################################################################################################
+            # What to insert from the robot
+            # x = float(robot.state[0]) # x pos
+            # y = float(robot.state[1]) # y pos
+            # theta = float(robot.state[2]) # theta
 
-                v = float(actions[-1][0]) # linear vel
-                w = float(actions[-1][1]) # anglar vel
+            # v = float(actions[-1][0]) # linear vel
+            # w = float(actions[-1][1]) # anglar vel
 
-                duck_payload = json.dumps({"v": round(v, 3), "w": round(w, 3)}) + "\n"
-                duck_data = duck_payload.encode("utf-8")
-                sock.sendall(duck_data)
+            # duck_payload = json.dumps({"v": round(v, 3), "w": round(w, 3)}) + "\n"
+            # duck_data = duck_payload.encode("utf-8")
+            # sock.sendall(duck_data)
 
-                controller.report_cost(debug_info['cost'],
-                                        debug_info['step_runtime'],
-                                        debug_info['monitored_cost'],
-                                        object_id=f"Robot {rid}")
+            controller.report_cost(debug_info['cost'],
+                                    debug_info['step_runtime'],
+                                    debug_info['monitored_cost'],
+                                    object_id=f"Robot {rid}")
 
-                if not actual_timetable[rid] or actual_timetable[rid][-1][1] != gpc.get_node_id(planner._current_target_node):
-                    actual_timetable[rid].append((kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node)))
-                else: # overwrite the time
-                    actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
+            if not actual_timetable[rid] or actual_timetable[rid][-1][1] != gpc.get_node_id(planner._current_target_node):
+                actual_timetable[rid].append((kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node)))
+            else: # overwrite the time
+                actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
 
-                ### Real run
-                # if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
-                if (not using_live_state) and (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
-                    if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.8) or planner.idle:
-                        robot.step(actions[-1])
-                robot_manager.set_pred_states(rid, np.asarray(pred_states))
+            ### Real run
+            # if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
+            if (not using_live_state) and (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
+                if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.8) or planner.idle:
+                    robot.step(actions[-1])
+            robot_manager.set_pred_states(rid, np.asarray(pred_states))
 
-                main_plotter.update_plot(rid, kt, actions[-1], None, debug_info['cost'], np.asarray(pred_states), current_refs)
-                visualizer.update(*robot.state)
+            main_plotter.update_plot(rid, kt, actions[-1], None, debug_info['cost'], np.asarray(pred_states), current_refs)
+            visualizer.update(*robot.state)
 
-                if not controller.check_termination_condition(external_check=planner.idle):
-                    incomplete = True
+            if not controller.check_termination_condition(external_check=planner.idle):
+                incomplete = True
 
-                    robot_states.append(robot.state)
+                robot_states.append(robot.state)
 
-                main_plotter.plot_in_loop(time=kt*config_mpc.ts, autorun=AUTORUN, zoom_in=None)
-                if not incomplete:
-                    break
+            main_plotter.plot_in_loop(time=kt*config_mpc.ts, autorun=AUTORUN, zoom_in=None)
+            if not incomplete:
+                break
 
 
     main_plotter.show()

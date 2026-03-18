@@ -9,7 +9,7 @@ This is essentialy the new control logic.
 from __future__ import annotations
 
 import math
-from typing import Any, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import numpy as np
 
@@ -27,7 +27,7 @@ from pkg_mpc_tracker.trajectory_tracker import TrajectoryTracker
 from pkg_robot.robot import Robot
 
 
-PathNode = tuple[float, float]
+PathNode = Tuple[float, float]
 
 
 class StepResult(TypedDict):
@@ -36,7 +36,7 @@ class StepResult(TypedDict):
     action: np.ndarray
     pred_states: np.ndarray
     current_refs: np.ndarray
-    debug_info: dict[str, Any]
+    debug_info: Dict[str, Any]
     current_target_node: Optional[PathNode]
     controller_idle: bool
     planner_idle: bool
@@ -83,8 +83,8 @@ class MpcAgent:
         self._map_loaded = False
         self._map_refresh_needed = False
         self._schedule_loaded = False
-        self._actual_timetable: list[tuple[float, Optional[str]]] = []
-        self._static_obstacles: list[list[PathNode]] = []
+        self._actual_timetable: List[Tuple[float, Optional[str]]] = []
+        self._static_obstacles: List[List[PathNode]] = []
 
     @property
     def state(self) -> np.ndarray:
@@ -97,10 +97,10 @@ class MpcAgent:
         return self.planner.current_target_node
 
     @property
-    def actual_timetable(self) -> list[tuple[float, Optional[str]]]:
+    def actual_timetable(self) -> List[Tuple[float, Optional[str]]]:
         return list(self._actual_timetable)
 
-    def load_map(self, boundary_coords: list[PathNode], static_obstacles: list[list[PathNode]]) -> None:
+    def load_map(self, boundary_coords: List[PathNode], static_obstacles: List[List[PathNode]]) -> None:
         self.planner.load_map(boundary_coords, static_obstacles)
         self._static_obstacles = static_obstacles
         self._map_loaded = True
@@ -109,8 +109,8 @@ class MpcAgent:
     def load_schedule(
         self,
         start_state: np.ndarray,
-        path_coords: list[PathNode],
-        path_times: Optional[list[float]],
+        path_coords: List[PathNode],
+        path_times: Optional[List[float]],
     ) -> None:
         if len(path_coords) < 1:
             raise ValueError("Schedule path must contain at least one coordinate.")
@@ -143,7 +143,7 @@ class MpcAgent:
     def step(
         self,
         t_now: float,
-        other_robot_states: Optional[list[float]] = None,
+        other_robot_states: Optional[List[float]] = None,
         ignore_speed_ref: bool = False,
         report_cost: bool = False,
     ) -> StepResult:

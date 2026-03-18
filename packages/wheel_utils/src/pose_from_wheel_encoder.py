@@ -48,9 +48,9 @@ class WheelEncoderReaderNode(DTROS):
         )
         self.pose_pub = rospy.Publisher(f"/{self._vehicle_name}/pose_reader", Float64MultiArray, queue_size=10)
 
-        # Geometry/calibration (override via ROS params if needed).
         self._wheel_radius = 0.0318
         self._axis_length = 0.1
+
         # self.first_callback = True
         self.left_enc_resolution = None
         self.left_meters_per_tick = None
@@ -121,6 +121,7 @@ class WheelEncoderReaderNode(DTROS):
         self.vtp_theta = self.vtp_theta_actual - self.vtp_theta_origin
         self.vtp_theta = (self.vtp_theta + math.pi) % (2 * math.pi) - math.pi
 
+
     def position_calc(self):
 
         if self._ticks_left is None or self._ticks_right is None:
@@ -145,7 +146,7 @@ class WheelEncoderReaderNode(DTROS):
 
         self.x += d * math.cos(self.theta + dtheta / 2)
         self.y += d * math.sin(self.theta + dtheta / 2)
-        self.theta += (dtheta * 2.0)
+        self.theta += (dtheta)*2 # prev was *2
         # Keep heading bounded to [-pi, pi] for symmetric CW/CCW comparison.
         self.theta = (self.theta + math.pi) % (2 * math.pi) - math.pi
 
@@ -155,7 +156,7 @@ class WheelEncoderReaderNode(DTROS):
 
         
     def run(self):
-        rate = rospy.Rate(2)
+        rate = rospy.Rate(5)
 
         while not rospy.is_shutdown():
             
@@ -166,9 +167,12 @@ class WheelEncoderReaderNode(DTROS):
                 msg = (
                     f"Encoder pose [x, y, theta]: "
                     f"{self.x:.3f}, {self.y:.3f}, {self.theta:.3f} | "
-                    f"Velocity pose (relative) [x, y, theta]: "
-                    f"{self.vtp_x:.3f}, {self.vtp_y:.3f}, {self.vtp_theta:.3f}"
+                    # f"Velocity pose (relative) [x, y, theta]: "
+                    # f"{self.vtp_x:.3f}, {self.vtp_y:.3f}, {self.vtp_theta:.3f}"
+                    f"Ticks [left, right]: "
+                    f"{self._ticks_left:.3f}, {self._ticks_right:.3f}"
                 )
+
                 rospy.loginfo(msg)
                 pose_msg = Float64MultiArray(data=[round(self.x, 3), round(self.y, 3), round(self.theta, 3)])
                 self.pose_pub.publish(pose_msg)

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import math
-from typing import Optional, Any, TYPE_CHECKING
+from typing import Optional, Any, TYPE_CHECKING, Tuple
 
 import numpy as np
 from scipy import interpolate # type: ignore
@@ -12,8 +14,8 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
 
-PathNode = tuple[float, float]
-TrajNode = tuple[float, float, float]
+PathNode = Tuple[float, float]
+TrajNode = Tuple[float, float, float]
 
 class LocalTrajPlanner:
     """The local planner for each individual robot takes path nodes and ETAs as inputs, and outputs local reference.
@@ -312,4 +314,3 @@ class LocalTrajPlanner:
 
     def plot_schedule(self, ax: Axes, plot_args:dict={'c':'r'}):
         ax.plot(self.ref_traj[:,0], self.ref_traj[:,1], 'o', markerfacecolor='none', **plot_args)
-

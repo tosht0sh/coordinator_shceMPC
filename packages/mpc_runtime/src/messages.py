@@ -8,25 +8,25 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 
-JsonDict = dict[str, Any]
+JsonDict = Dict[str, Any]
 PacketType = Union["MapPacket", "SchedulePacket", "TelemetryPacket", "StatusPacket"]
 
 
 
-def _float_list(values: list[Any]) -> list[float]:
+def _float_list(values: List[Any]) -> List[float]:
     return [float(v) for v in values]
 
 
 
-def _float_2d(points: list[Any]) -> list[list[float]]:
+def _float_2d(points: List[Any]) -> List[List[float]]:
     return [_float_list(list(point)) for point in points]
 
 
 
-def _float_3d(groups: list[Any]) -> list[list[list[float]]]:
+def _float_3d(groups: List[Any]) -> List[List[List[float]]]:
     return [_float_2d(list(group)) for group in groups]
 
 
@@ -35,8 +35,8 @@ class MapPacket:
     """Map payload sent from laptop to bot for onboard replanning."""
 
     map_id: str
-    boundary_coords: list[list[float]]
-    static_obstacles: list[list[list[float]]]
+    boundary_coords: List[List[float]]
+    static_obstacles: List[List[List[float]]]
     kind: str = field(init=False, default="map_update")
 
     def to_payload(self) -> JsonDict:
@@ -57,9 +57,9 @@ class SchedulePacket:
 
     robot_id: str
     schedule_id: str
-    start_state: list[float]
-    path_coords: list[list[float]]
-    path_times: Optional[list[float]]
+    start_state: List[float]
+    path_coords: List[List[float]]
+    path_times: Optional[List[float]]
     effective_from: float = 0.0
     kind: str = field(init=False, default="schedule_update")
 
@@ -86,11 +86,11 @@ class TelemetryPacket:
     robot_id: str
     schedule_id: str
     t: float
-    pose: list[float]
-    action: list[float]
-    pred_states: list[list[float]]
-    current_refs: list[list[float]]
-    current_target_node: Optional[list[float]]
+    pose: List[float]
+    action: List[float]
+    pred_states: List[List[float]]
+    current_refs: List[List[float]]
+    current_target_node: Optional[List[float]]
     cost: Optional[float] = None
     solver_time: Optional[float] = None
     status: str = "running"

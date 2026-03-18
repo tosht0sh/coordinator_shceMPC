@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # System import
 # import os
 # import sys
@@ -5,7 +7,7 @@ import math
 import warnings
 import itertools
 from timeit import default_timer as timer
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, TypedDict
+from typing import Any, Callable, Dict, Optional, Protocol, TYPE_CHECKING, Tuple, TypedDict
 # External import
 import numpy as np
 from scipy.spatial import ConvexHull # type: ignore
@@ -19,10 +21,10 @@ if TYPE_CHECKING:
     from .cost_monitor import CostMonitor, MonitoredCost
 else:
     CostMonitor = Any
-    MonitoredCost = dict[str, Any]
+    MonitoredCost = Dict[str, Any]
 
 
-PathNode = tuple[float, float]
+PathNode = Tuple[float, float]
 
 
 class Solver(Protocol): # this is not found in the .so file (in ternimal: nm -D  navi_test.so)

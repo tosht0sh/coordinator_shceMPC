@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Bot-side ROS entrypoint for onboard local planner + MPC execution.
+"""
+
+Bot-side ROS entrypoint for onboard local planner + MPC execution.
 
 This node:
 - receives map/schedule updates from the laptop over TCP
@@ -53,11 +55,11 @@ class BotMpcNode(DTROS):
 
         self.schedule_bind_ip = os.getenv("MPC_SCHEDULE_BIND_IP", "0.0.0.0")
         self.schedule_port = int(os.getenv("MPC_SCHEDULE_PORT", "5007"))
-        self.telemetry_ip = os.getenv("MPC_TELEMETRY_IP", os.getenv("LAPTOP_IP", "192.168.1.197"))
+        self.telemetry_ip = os.getenv("MPC_TELEMETRY_IP", os.getenv("LAPTOP_IP", "192.168.1.10"))
         self.telemetry_port = int(os.getenv("MPC_TELEMETRY_PORT", "5008"))
         self.ignore_speed_ref = _env_bool("MPC_IGNORE_SPEED_REF", False)
         self.report_cost = _env_bool("MPC_REPORT_COST", False)
-        self.omega_scale = float(os.getenv("MPC_OMEGA_SCALE", "1.5"))
+        self.omega_scale = float(os.getenv("MPC_OMEGA_SCALE", "1.0"))
 
         cfg_name = os.getenv("MPC_CFG_NAME", "mpc_fast.yaml")
         robot_cfg_name = os.getenv("MPC_ROBOT_CFG_NAME", "robot_spec.yaml")
@@ -85,8 +87,10 @@ class BotMpcNode(DTROS):
         self._logical_robot_id = self.vehicle_name
         self._schedule_epoch = rospy.get_time()
         self._schedule_loaded = False
+        self._idle_stop_sent = False
         self._buffer = ""
         self._conn = None
+        self._server = None
         self._server = self._create_schedule_server()
         self._telemetry_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -163,6 +167,7 @@ class BotMpcNode(DTROS):
             self._schedule_id = packet.schedule_id
             self._logical_robot_id = packet.robot_id
             self._schedule_epoch = rospy.get_time() + max(0.0, packet.effective_from)
+            self._idle_stop_sent = False
             self.agent.load_schedule(
                 start_state=np.asarray(packet.start_state, dtype=float),
                 path_coords=[tuple(point) for point in packet.path_coords],
@@ -173,9 +178,14 @@ class BotMpcNode(DTROS):
             return
 
     def _publish_action(self, action: np.ndarray) -> None:
-        msg = Twist2DStamped(v=float(action[0]), omega=float(action[1]) * self.omega_scale)
+        published_action = np.asarray(
+            [float(action[0]), float(action[1]) * self.omega_scale],
+            dtype=float,
+        )
+        msg = Twist2DStamped(v=float(published_action[0]), omega=float(published_action[1]))
         self.cmd_pub.publish(msg)
-        self._last_action = np.asarray(action, dtype=float)
+        self._last_action = published_action
+        rospy.loginfo(self._last_action )
 
     def _reported_robot_id(self) -> str:
         return self._logical_robot_id
@@ -200,7 +210,7 @@ class BotMpcNode(DTROS):
             schedule_id=self._schedule_id,
             t=max(0.0, rospy.get_time() - self._schedule_epoch),
             pose=self.agent.state.tolist(),
-            action=np.asarray(step_result["action"], dtype=float).tolist(),
+            action=self._last_action.tolist(),
             pred_states=np.asarray(step_result["pred_states"], dtype=float).tolist(),
             current_refs=np.asarray(step_result["current_refs"], dtype=float).tolist(),
             current_target_node=None if target_node is None else [float(target_node[0]), float(target_node[1])],
@@ -241,14 +251,32 @@ class BotMpcNode(DTROS):
                 ignore_speed_ref=self.ignore_speed_ref,
                 report_cost=self.report_cost,
             )
-            self._publish_action(step_result["action"])
+
+            if step_result["controller_idle"]:
+                if not self._idle_stop_sent:
+                    self._publish_action(self.agent.stop_action())
+                    self._idle_stop_sent = True
+            else:
+                self._publish_action(step_result["action"])
+                self._idle_stop_sent = False
+
+            pose = self._latest_pose
+            cmd = self._last_action
+            rospy.loginfo_throttle(
+                1.0,
+                f"[mpc_runtime data] pose=({pose[0]:.3f}, {pose[1]:.3f}, {pose[2]:.3f}) "
+                f"cmd=({cmd[0]:.3f}, {cmd[1]:.3f}) idle={step_result['controller_idle']}"
+)
+
+            
             self._send_telemetry(step_result)
             rate.sleep()
 
     def on_shutdown(self) -> None:
         self._publish_action(self.agent.stop_action())
         self._close_connection()
-        self._server.close()
+        if self._server is not None:
+            self._server.close()
         self._telemetry_sock.close()
 
 

@@ -12,7 +12,7 @@ import pathlib
 import socket
 import sys
 import time
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd  # type: ignore
@@ -38,7 +38,7 @@ from visualizer.object import CircularVehicleVisualizer
 DATA_NAME = os.getenv("MPC_DATA_NAME", "schedule_demo2_data")
 ENV_FOLDER = os.getenv("MPC_ENV_FOLDER", "")
 SCHEDULE_VARIANT = os.getenv("MPC_SCHEDULE_VARIANT", "SingleRobot")
-TELEMETRY_BIND_IP = os.getenv("MPC_TELEMETRY_BIND_IP", "0.0.0.0")
+TELEMETRY_BIND_IP = os.getenv("MPC_TELEMETRY_BIND_IP", "192.168.1.10")
 TELEMETRY_PORT = int(os.getenv("MPC_TELEMETRY_PORT", "5008"))
 MONITOR_AUTORUN = os.getenv("MPC_MONITOR_AUTORUN", "1").strip().lower() in {"1", "true", "yes", "on"}
 MAP_ONLY = os.getenv("MPC_MONITOR_MAP_ONLY", "1").strip().lower() in {"1", "true", "yes", "on"}
@@ -48,7 +48,7 @@ IDLE_TIMEOUT = float(os.getenv("MPC_MONITOR_IDLE_TIMEOUT", "0.1"))
 
 
 
-def _schedule_paths(data_dir: pathlib.Path, variant: str) -> tuple[pathlib.Path, pathlib.Path]:
+def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path, pathlib.Path]:
     mapping = {
         "Original": ("schedule.csv", "robot_start.json"),
         "SingleRobot": ("schedule_SingleRobot.csv", "robot_start_SingleRobot.json"),
@@ -100,13 +100,13 @@ class MonitorNode:
             "#0072B2", "#D55E00", "#009E73", "#F0E442", "#56B4E9",
             "#E69F00", "#CC79A7", "#0072B2", "#D55E00", "#009E73",
         ]
-        self.visualizers: dict[str, CircularVehicleVisualizer] = {}
-        self.shadow_visualizers: dict[str, CircularVehicleVisualizer] = {}
+        self.visualizers: Dict[str, CircularVehicleVisualizer] = {}
+        self.shadow_visualizers: Dict[str, CircularVehicleVisualizer] = {}
         self.shadow_model = UnicycleModel(sampling_time=self.config_mpc.ts)
-        self.shadow_states: dict[str, np.ndarray] = {}
-        self.last_packet_time: dict[str, float] = {}
-        self.actual_timetable: dict[str, list[tuple[float, Optional[object]]]] = {rid: [] for rid in self.robot_ids}
-        self.latest_packet: dict[str, TelemetryPacket] = {}
+        self.shadow_states: Dict[str, np.ndarray] = {}
+        self.last_packet_time: Dict[str, float] = {}
+        self.actual_timetable: Dict[str, List[Tuple[float, Optional[object]]]] = {rid: [] for rid in self.robot_ids}
+        self.latest_packet: Dict[str, TelemetryPacket] = {}
 
         for index, rid in enumerate(self.robot_ids):
             source_robot_id = self.robot_id_lookup[rid]

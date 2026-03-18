@@ -11,7 +11,7 @@ import os
 import pathlib
 import socket
 import sys
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 
 
 THIS_FILE = pathlib.Path(__file__).resolve()
@@ -39,9 +39,9 @@ DEFAULT_BOT_HOST = os.getenv("MPC_DEFAULT_BOT_HOST", "")
 
 
 
-def _load_endpoint_map() -> dict[str, tuple[str, int]]:
+def _load_endpoint_map() -> Dict[str, Tuple[str, int]]:
     raw = os.getenv("MPC_BOT_ENDPOINTS", "").strip()
-    endpoint_map: dict[str, tuple[str, int]] = {}
+    endpoint_map: Dict[str, Tuple[str, int]] = {}
     if not raw:
         return endpoint_map
 
@@ -64,7 +64,7 @@ def _load_endpoint_map() -> dict[str, tuple[str, int]]:
 
 
 
-def _schedule_paths(data_dir: pathlib.Path, variant: str) -> tuple[pathlib.Path, pathlib.Path]:
+def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path, pathlib.Path]:
     mapping = {
         "Original": ("schedule.csv", "robot_start.json"),
         "SingleRobot": ("schedule_SingleRobot.csv", "robot_start_SingleRobot.json"),
@@ -105,7 +105,7 @@ class SchedulerDispatcher:
         )
         self.robot_ids = self.gpc.robot_ids
 
-    def _endpoint_for(self, robot_id: str) -> tuple[str, int]:
+    def _endpoint_for(self, robot_id: str) -> Tuple[str, int]:
         if robot_id in self.endpoint_map:
             return self.endpoint_map[robot_id]
         if DEFAULT_BOT_HOST:
@@ -137,7 +137,10 @@ class SchedulerDispatcher:
         map_packet = self.build_map_packet()
         for robot_id in self.robot_ids:
             rid = str(robot_id)
+            # host = "192.168.1.102" # Robots ip
+            # port = 5007
             host, port = self._endpoint_for(rid)
+
             schedule_packet = self.build_schedule_packet(robot_id)
             with socket.create_connection((host, port), timeout=DISPATCH_TIMEOUT) as sock:
                 if SEND_MAP:

@@ -1,1 +1,9 @@
-# LIST YOUR APT PACKAGES HERE
+# System Python packages for the Duckiebot image.
+# Prefer apt for common scientific packages on Ubuntu 18.04 / Python 3.8.
+# This avoids pip trying to replace distutils/apt-managed installs in the base image.
+
+python3-networkx
+python3-numpy
+python3-scipy
+python3-shapely
+python3-yaml
