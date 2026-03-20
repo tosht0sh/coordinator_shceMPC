@@ -83,7 +83,7 @@ class WheelEncoderReaderNode(DTROS):
         # )
 
         # imu settings
-        self._imu_reader_topic = f"/duck1/imu_node/data"
+        self._imu_reader_topic = f"/{self._vehicle_name}/imu_node/data"
 
         self._ang_vel = None
 
@@ -91,7 +91,7 @@ class WheelEncoderReaderNode(DTROS):
         # self._imu_rate = 30
 
         # kinematics node pose 
-        self._vel_reader_topic = f"/duck1/kinematics_node/velocity"
+        self._vel_reader_topic = f"/{self._vehicle_name}/kinematics_node/velocity"
 
         self._lin_vel_kn = 0.0
         self._ang_vel_kn = 0.0
