@@ -1,27 +1,39 @@
+from __future__ import annotations
+
 # System import
-import os
-import sys
+# import os
+# import sys
 import math
 import warnings
 import itertools
 from timeit import default_timer as timer
-from typing import Callable, Optional, TypedDict
+from typing import Any, Callable, Dict, Optional, Protocol, TYPE_CHECKING, Tuple, TypedDict
 # External import
 import numpy as np
 from scipy.spatial import ConvexHull # type: ignore
-# Custom import 
+# Custom import
 from configs import MpcConfiguration, CircularRobotSpecification
-from .cost_monitor import CostMonitor, MonitoredCost
 from .casadi_build.casadi_impl import CasadiNMPC
 
+# Original runtime import kept for reference. It pulls in the PANOC/OpenGEN monitor path.
+# from .cost_monitor import CostMonitor, MonitoredCost
+if TYPE_CHECKING:
+    from .cost_monitor import CostMonitor, MonitoredCost
+else:
+    CostMonitor = Any
+    MonitoredCost = Dict[str, Any]
 
-PathNode = tuple[float, float]
+
+PathNode = Tuple[float, float]
 
 
-class Solver(): # this is not found in the .so file (in ternimal: nm -D  navi_test.so)
-    import opengen as og # type: ignore
-    def run(self, p: list, initial_guess=None, initial_lagrange_multipliers=None, initial_penalty=None) -> og.opengen.tcp.solver_status.SolverStatus: pass
+class Solver(Protocol): # this is not found in the .so file (in ternimal: nm -D  navi_test.so)
+    # Previous Solver class code
+    # import opengen as og # type: ignore
+    # def run(self, p: list, initial_guess=None, initial_lagrange_multipliers=None, initial_penalty=None) -> og.opengen.tcp.solver_status.SolverStatus: pass
 
+    # Updated Solver class without opengen
+    def run(self, p: list, initial_guess=None, initial_lagrange_multipliers=None, initial_penalty=None) -> Any: ...
 
 class DebugInfo(TypedDict):
     cost: float
@@ -83,6 +95,7 @@ class TrajectoryTracker:
         self.nu = self.config.nu
         self.N_hor = self.config.N_hor
         self.solver_type = self.config.solver_type
+        self.use_tcp = use_tcp
 
         # Initialization
         self._idle = True
@@ -94,8 +107,10 @@ class TrajectoryTracker:
 
         # Monitor
         self.monitor_on = False
-        self.cost_monitor = CostMonitor(self.config, self.robot_spec, verbose)
-        self.cost_monitor.init_params()
+        # Original eager monitor construction kept for reference.
+        # self.cost_monitor = CostMonitor(self.config, self.robot_spec, verbose)
+        # self.cost_monitor.init_params()
+        self.cost_monitor: Optional[CostMonitor] = None
 
         if self.config.solver_type == 'PANOC':
             self.__import_solver(use_tcp=use_tcp)
@@ -112,18 +127,20 @@ class TrajectoryTracker:
             use_tcp: If the PANOC solver is called via TCP or not. Defaults to False.
         """
 
-        self.use_tcp = use_tcp
-        solver_path = os.path.join(root_dir, self.config.build_directory, self.config.optimizer_name)
-
-        import opengen as og
-        if not use_tcp:
-            sys.path.append(solver_path)
-            built_solver = __import__(self.config.optimizer_name) # it loads a .so (shared library object)
-            self.solver:Solver = built_solver.solver() # Return a Solver object with run method, cannot find it though
-        else: # use TCP manager to access solver
-            self.mng:og.opengen.tcp.OptimizerTcpManager = og.tcp.OptimizerTcpManager(solver_path)
-            self.mng.start()
-            self.mng.ping() # ensure RUST solver is up and runnings
+        # Original PANOC/OpenGEN import path kept for reference.
+        # self.use_tcp = use_tcp
+        # solver_path = os.path.join(root_dir, self.config.build_directory, self.config.optimizer_name)
+        #
+        # import opengen as og
+        # if not use_tcp:
+        #     sys.path.append(solver_path)
+        #     built_solver = __import__(self.config.optimizer_name) # it loads a .so (shared library object)
+        #     self.solver:Solver = built_solver.solver() # Return a Solver object with run method, cannot find it though
+        # else: # use TCP manager to access solver
+        #     self.mng:og.opengen.tcp.OptimizerTcpManager = og.tcp.OptimizerTcpManager(solver_path)
+        #     self.mng.start()
+        #     self.mng.ping() # ensure RUST solver is up and runnings
+        raise RuntimeError("PANOC/OpenGEN support is disabled in this runtime. Use solver_type='Casadi'.")
 
     def _obstacle_weights(self):
         """Set the weights for static and dynamic obstacles based on the configuration.
@@ -201,7 +218,10 @@ class TrajectoryTracker:
             Model: The motion model should be the same as the builder's motion model.
         """
         self.motion_model = motion_model
-        self.cost_monitor.load_motion_model(motion_model)
+        # Original eager monitor hook kept for reference.
+        # self.cost_monitor.load_motion_model(motion_model)
+        if self.cost_monitor is not None:
+            self.cost_monitor.load_motion_model(motion_model)
 
         ### Added ###
         if self.solver_type == 'Casadi':
@@ -294,7 +314,24 @@ class TrajectoryTracker:
         Args:
             monitor_on: If the monitor is on. Defaults to True.
         """
+        # Original behavior kept for reference.
+        # self.monitor_on = monitor_on
         self.monitor_on = monitor_on
+        if not monitor_on:
+            return
+
+        if self.cost_monitor is None:
+            try:
+                from .cost_monitor import CostMonitor as RuntimeCostMonitor
+                self.cost_monitor = RuntimeCostMonitor(self.config, self.robot_spec, self.vb)
+            except (ModuleNotFoundError, RuntimeError) as exc:
+                self.monitor_on = False
+                raise RuntimeError(
+                    "Cost monitoring requires PANOC/OpenGEN components, which are disabled or unavailable in this runtime."
+                ) from exc
+
+        if hasattr(self, "motion_model"):
+            self.cost_monitor.load_motion_model(self.motion_model)
 
     def set_current_state(self, current_state: np.ndarray):
         """To synchronize the current state of the robot with the trajectory tracker.
@@ -469,7 +506,7 @@ class TrajectoryTracker:
             raise RuntimeError(f"[{self.__class__.__name__}-{self.robot_id}] Cannot run solver.")
         
         monitored_costs = None
-        if self.monitor_on:
+        if self.monitor_on and self.cost_monitor is not None:
             monitored_costs = self.cost_monitor.get_cost(self.state, params, u, report=report_cost)
 
         assert isinstance(cost, float)
@@ -509,16 +546,18 @@ class TrajectoryTracker:
             The motion model (dynamics) is defined initially.
         """
         if self.solver_type == 'PANOC':
-            if self.use_tcp:
-                return self.run_solver_tcp(parameters, state, take_steps)
-
-            import opengen as og
-            solution:og.opengen.tcp.solver_status.SolverStatus = self.solver.run(parameters, initial_guess)
-            
-            u:list[float]       = solution.solution
-            cost:float          = solution.cost
-            exit_status:str     = solution.exit_status
-            solver_time:float   = solution.solve_time_ms
+            # Original PANOC/OpenGEN solver path kept for reference.
+            # if self.use_tcp:
+            #     return self.run_solver_tcp(parameters, state, take_steps)
+            #
+            # import opengen as og
+            # solution:og.opengen.tcp.solver_status.SolverStatus = self.solver.run(parameters, initial_guess)
+            #
+            # u:list[float]       = solution.solution
+            # cost:float          = solution.cost
+            # exit_status:str     = solution.exit_status
+            # solver_time:float   = solution.solve_time_ms
+            raise RuntimeError("PANOC/OpenGEN support is disabled in this runtime. Use solver_type='Casadi'.")
 
         elif self.solver_type == 'Casadi':
             if self._casadi_problem is None:
@@ -715,39 +754,41 @@ class TrajectoryTracker:
         return taken_states, pred_states, actions, cost, solver_time, exit_status, u
 
     def run_solver_tcp(self, parameters:list, state: np.ndarray, take_steps:int=1):
-        solution = self.mng.call(parameters)
-        if solution.is_ok(): # Solver returned a solution
-            solution = solution.get()
-            u:list[float]       = solution.solution
-            cost:float          = solution.cost
-            exit_status:str     = solution.exit_status
-            solver_time:float   = solution.solve_time_ms
-        else: # Invocation failed - an error report is returned
-            solver_error = solution.get()
-            error_code = solver_error.code
-            error_msg = solver_error.message
-            self.mng.kill() # kill so rust code wont keep running if python crashes
-            raise RuntimeError(f"[{self.__class__.__name__}-{self.robot_id}] MPC Solver error: [{error_code}]{error_msg}")
-
-        taken_states:list[np.ndarray] = []
-        for i in range(take_steps):
-            state_next = self.motion_model( state, np.array(u[(i*self.nu):((i+1)*self.nu)]), self.ts )
-            taken_states.append(state_next)
-
-        pred_states:list[np.ndarray] = [taken_states[-1]]
-        for i in range(len(u)//self.nu):
-            pred_state_next = self.motion_model( pred_states[-1], np.array(u[(i*self.nu):(2+i*self.nu)]), self.ts )
-            pred_states.append(pred_state_next)
-        pred_states = pred_states[1:]
-
-        actions = np.array(u[:self.nu*take_steps]).reshape(take_steps, self.nu).tolist()
-        actions = [np.array(action) for action in actions] # type: ignore
-        return taken_states, pred_states, actions, cost, solver_time, exit_status, u
+        # Original PANOC/OpenGEN TCP path kept for reference.
+        # solution = self.mng.call(parameters)
+        # if solution.is_ok(): # Solver returned a solution
+        #     solution = solution.get()
+        #     u:list[float]       = solution.solution
+        #     cost:float          = solution.cost
+        #     exit_status:str     = solution.exit_status
+        #     solver_time:float   = solution.solve_time_ms
+        # else: # Invocation failed - an error report is returned
+        #     solver_error = solution.get()
+        #     error_code = solver_error.code
+        #     error_msg = solver_error.message
+        #     self.mng.kill() # kill so rust code wont keep running if python crashes
+        #     raise RuntimeError(f"[{self.__class__.__name__}-{self.robot_id}] MPC Solver error: [{error_code}]{error_msg}")
+        #
+        # taken_states:list[np.ndarray] = []
+        # for i in range(take_steps):
+        #     state_next = self.motion_model( state, np.array(u[(i*self.nu):((i+1)*self.nu)]), self.ts )
+        #     taken_states.append(state_next)
+        #
+        # pred_states:list[np.ndarray] = [taken_states[-1]]
+        # for i in range(len(u)//self.nu):
+        #     pred_state_next = self.motion_model( pred_states[-1], np.array(u[(i*self.nu):(2+i*self.nu)]), self.ts )
+        #     pred_states.append(pred_state_next)
+        # pred_states = pred_states[1:]
+        #
+        # actions = np.array(u[:self.nu*take_steps]).reshape(take_steps, self.nu).tolist()
+        # actions = [np.array(action) for action in actions] # type: ignore
+        # return taken_states, pred_states, actions, cost, solver_time, exit_status, u
+        raise RuntimeError("PANOC/OpenGEN TCP support is disabled in this runtime.")
     
     def report_cost(self, real_cost: float, step_runtime: float, monitored_cost: MonitoredCost, object_id:Optional[str]=None, report_steps:bool=False):
         def colored_print(r, g, b, text, end='\n'):
             print(f"\033[38;2;{r};{g};{b}m{text} \033[38;2;255;255;255m", end=end) 
-        if self.monitor_on:
+        if self.monitor_on and self.cost_monitor is not None:
             self.cost_monitor.report_cost(monitored_cost, object_id=object_id, report_steps=report_steps)
         if self.solver_time_timelist:
             solver_time = round(self.solver_time_timelist[-1], 3)

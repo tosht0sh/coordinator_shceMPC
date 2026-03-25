@@ -1,16 +1,21 @@
+from __future__ import annotations
+
 import math
-from typing import Optional, Any
+from typing import Optional, Any, TYPE_CHECKING, Tuple
 
 import numpy as np
 from scipy import interpolate # type: ignore
-from matplotlib.axes import Axes # type: ignore
+# from matplotlib.axes import Axes # type: ignore
 
 from ._ref_traj_generation import TrajectoryGeneration
-from .path_plan_cspace import visibility # optional if don't need to use the local replanner
+# from .path_plan_cspace import visibility # optional if don't need to use the local replanner
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
 
 
-PathNode = tuple[float, float]
-TrajNode = tuple[float, float, float]
+PathNode = Tuple[float, float]
+TrajNode = Tuple[float, float, float]
 
 class LocalTrajPlanner:
     """The local planner for each individual robot takes path nodes and ETAs as inputs, and outputs local reference.
@@ -111,9 +116,16 @@ class LocalTrajPlanner:
         new_states = np.column_stack([new_x, new_y, new_heading])[:n_states, :]
         return new_states
 
-    def load_map(self, boundary_coords: list[PathNode], obstacle_list: list[list[PathNode]]):
-        """Load the map for the local path planner."""
-        self.path_planner = visibility.VisibilityPathFinder(boundary_coords, obstacle_list, verbose=self.vb)
+    # Original load_map function
+    # def load_map(self, boundary_coords: list[PathNode], obstacle_list: list[list[PathNode]]):
+    #     """Load the map for the local path planner."""
+    #     self.path_planner = visibility.VisibilityPathFinder(boundary_coords, obstacle_list, verbose=self.vb)
+
+    # Updated load_map function for bot only MPC
+    def load_map(self, boundary_coords, obstacle_list):
+        from .path_plan_cspace.visibility import VisibilityPathFinder
+        self.path_planner = VisibilityPathFinder(boundary_coords, obstacle_list, verbose=self.vb)
+
 
     def load_path(self, path_coords: list[PathNode], path_times: Optional[list[float]], nomial_speed:Optional[float]=None, method:str='linear'):
         """The reference speed is used to generate the base trajectory.
@@ -302,4 +314,3 @@ class LocalTrajPlanner:
 
     def plot_schedule(self, ax: Axes, plot_args:dict={'c':'r'}):
         ax.plot(self.ref_traj[:,0], self.ref_traj[:,1], 'o', markerfacecolor='none', **plot_args)
-
