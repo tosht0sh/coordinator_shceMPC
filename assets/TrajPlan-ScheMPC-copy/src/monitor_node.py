@@ -1,7 +1,15 @@
-"""Laptop-side monitor and optional shadow simulation.
+"""Laptop-side monitor, shadow simulation, and multi-bot neighbor-state relay.
 
-This script listens for bot telemetry, updates the existing visualization stack,
-and can run a lightweight shadow unicycle model to compare model motion to real motion.
+This script listens for bot telemetry, updates the visualization stack, and can run a
+lightweight shadow unicycle model to compare model motion to real motion.
+
+For multi-bot MPC we also use it as a relay:
+- each bot sends telemetry to the laptop
+- the laptop collects the latest predicted trajectory from every bot
+- the laptop forwards each bot a flattened view of all *other* robots
+
+That keeps the MPC solve distributed on the bots while avoiding direct bot-to-bot
+network plumbing.
 """
 
 from __future__ import annotations
@@ -29,7 +37,7 @@ for path in (TRAJPLAN_SRC, MPC_RUNTIME_SRC):
 
 from basic_motion_model.motion_model import UnicycleModel
 from configs import CircularRobotSpecification, MpcConfiguration
-from messages import TelemetryPacket, packet_from_json
+from messages import NeighborStatesPacket, TelemetryPacket, packet_from_json, packet_to_wire
 from pkg_motion_plan.global_path_coordinate import GlobalPathCoordinator
 from visualizer.mpc_plot import MpcPlotInLoop
 from visualizer.object import CircularVehicleVisualizer
@@ -38,14 +46,42 @@ from visualizer.object import CircularVehicleVisualizer
 DATA_NAME = os.getenv("MPC_DATA_NAME", "schedule_demo2_data")
 ENV_FOLDER = os.getenv("MPC_ENV_FOLDER", "")
 SCHEDULE_VARIANT = os.getenv("MPC_SCHEDULE_VARIANT", "SingleRobot")
-TELEMETRY_BIND_IP = os.getenv("MPC_TELEMETRY_BIND_IP", "192.168.1.10")
+TELEMETRY_BIND_IP = os.getenv("MPC_TELEMETRY_BIND_IP", "0.0.0.0")
 TELEMETRY_PORT = int(os.getenv("MPC_TELEMETRY_PORT", "5008"))
+NEIGHBOR_RELAY = os.getenv("MPC_NEIGHBOR_RELAY", "1").strip().lower() in {"1", "true", "yes", "on"}
+NEIGHBOR_PORT = int(os.getenv("MPC_NEIGHBOR_PORT", "5009"))
+DEFAULT_BOT_PORT = int(os.getenv("MPC_DEFAULT_BOT_PORT", "5007"))
 MONITOR_AUTORUN = os.getenv("MPC_MONITOR_AUTORUN", "1").strip().lower() in {"1", "true", "yes", "on"}
 MAP_ONLY = os.getenv("MPC_MONITOR_MAP_ONLY", "1").strip().lower() in {"1", "true", "yes", "on"}
 SHADOW_SIM = os.getenv("MPC_SHADOW_SIM", "1").strip().lower() in {"1", "true", "yes", "on"}
 OUTPUT_CSV = os.getenv("MPC_MONITOR_ACTUAL_CSV", "Actual_monitor.csv")
 IDLE_TIMEOUT = float(os.getenv("MPC_MONITOR_IDLE_TIMEOUT", "0.1"))
 
+
+def _load_endpoint_map() -> Dict[str, Tuple[str, int]]:
+    """Parse the same robot-id -> host mapping used by the scheduler dispatcher."""
+
+    raw = os.getenv("MPC_BOT_ENDPOINTS", "").strip()
+    endpoint_map: Dict[str, Tuple[str, int]] = {}
+    if not raw:
+        return endpoint_map
+
+    loaded = json.loads(raw)
+    if not isinstance(loaded, dict):
+        raise ValueError("MPC_BOT_ENDPOINTS must be a JSON object.")
+
+    for robot_id, value in loaded.items():
+        rid = str(robot_id)
+        if isinstance(value, str):
+            host, _, port = value.partition(":")
+            endpoint_map[rid] = (host, int(port or DEFAULT_BOT_PORT))
+        elif isinstance(value, dict):
+            host = str(value["host"])
+            port = int(value.get("port", DEFAULT_BOT_PORT))
+            endpoint_map[rid] = (host, port)
+        else:
+            raise ValueError(f"Unsupported endpoint spec for robot {rid}: {value!r}")
+    return endpoint_map
 
 
 def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path, pathlib.Path]:
@@ -59,7 +95,7 @@ def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path,
 
 
 class MonitorNode:
-    """Receive telemetry, update plots, and save monitored execution summaries."""
+    """Receive telemetry, update plots, and relay neighbor trajectories to the bots."""
 
     def __init__(self, env_folder: str) -> None:
         if not env_folder:
@@ -69,6 +105,8 @@ class MonitorNode:
         self.data_dir = self.root_dir / "data" / DATA_NAME
         self.config_dir = self.root_dir / "config"
         self.env_folder = env_folder
+        self.endpoint_map = _load_endpoint_map()
+        self.neighbor_relay_enabled = NEIGHBOR_RELAY and bool(self.endpoint_map)
 
         config_mpc_path = self.config_dir / os.getenv("MPC_CFG_NAME", "mpc_fast.yaml")
         config_robot_path = self.config_dir / "robot_spec.yaml"
@@ -107,6 +145,7 @@ class MonitorNode:
         self.last_packet_time: Dict[str, float] = {}
         self.actual_timetable: Dict[str, List[Tuple[float, Optional[object]]]] = {rid: [] for rid in self.robot_ids}
         self.latest_packet: Dict[str, TelemetryPacket] = {}
+        self._relay_warned_missing_endpoint: set[str] = set()
 
         for index, rid in enumerate(self.robot_ids):
             source_robot_id = self.robot_id_lookup[rid]
@@ -138,6 +177,13 @@ class MonitorNode:
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((TELEMETRY_BIND_IP, TELEMETRY_PORT))
         self.sock.setblocking(False)
+        self.peer_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if self.neighbor_relay_enabled else None
+
+        print(f"[Monitor] Listening for telemetry on {TELEMETRY_BIND_IP}:{TELEMETRY_PORT}")
+        if self.neighbor_relay_enabled:
+            print(f"[Monitor] Relaying neighbor trajectories to bots on UDP port {NEIGHBOR_PORT}")
+        elif NEIGHBOR_RELAY:
+            print("[Monitor] Neighbor relay requested but MPC_BOT_ENDPOINTS is empty; relay disabled.")
 
     def _poll_packets(self, max_packets: int = 64) -> None:
         for _ in range(max_packets):
@@ -158,6 +204,86 @@ class MonitorNode:
             if not isinstance(decoded, TelemetryPacket):
                 continue
             self._handle_telemetry(decoded)
+
+    def _prediction_from_packet(self, packet: TelemetryPacket) -> np.ndarray:
+        """Return one robot's predicted trajectory as a dense `(N_hor+1, ns)` array.
+
+        If a bot has not yet published predictions, we conservatively repeat its
+        current pose across the horizon so the receiving bot still sees a valid
+        obstacle trajectory.
+        """
+
+        ns = self.config_mpc.ns
+        horizon_len = self.config_mpc.N_hor + 1
+        pose = np.asarray(packet.pose[:ns], dtype=float)
+        pred_states = np.asarray(packet.pred_states, dtype=float) if packet.pred_states else np.empty((0, ns))
+
+        if pred_states.ndim != 2 or pred_states.shape[0] == 0:
+            return np.tile(pose, (horizon_len, 1))
+
+        pred_states = pred_states[:, :ns]
+        if pred_states.shape[0] >= horizon_len:
+            return pred_states[:horizon_len]
+
+        pad = np.repeat(pred_states[-1:, :], horizon_len - pred_states.shape[0], axis=0)
+        return np.vstack((pred_states, pad))
+
+    def _build_other_robot_states(self, target_robot_id: str) -> tuple[list[float], list[str]]:
+        """Flatten every *other* robot trajectory into the solver's expected layout."""
+
+        ns = self.config_mpc.ns
+        horizon_len = self.config_mpc.N_hor + 1
+        slot_len = ns * horizon_len
+        max_other = self.config_mpc.Nother
+
+        if max_other <= 0:
+            return [], []
+
+        flattened: list[float] = []
+        source_robot_ids: list[str] = []
+        for rid in sorted(self.robot_ids):
+            if rid == target_robot_id:
+                continue
+            packet = self.latest_packet.get(rid)
+            if packet is None:
+                continue
+            if len(source_robot_ids) >= max_other:
+                break
+            pred = self._prediction_from_packet(packet)
+            flattened.extend(pred.reshape(-1).tolist())
+            source_robot_ids.append(rid)
+
+        while len(flattened) < slot_len * max_other:
+            flattened.extend([-10.0] * slot_len)
+
+        return flattened[: slot_len * max_other], source_robot_ids
+
+    def _relay_neighbor_states(self) -> None:
+        if not self.neighbor_relay_enabled or self.peer_sock is None:
+            return
+
+        for rid in self.robot_ids:
+            endpoint = self.endpoint_map.get(rid)
+            if endpoint is None:
+                if rid not in self._relay_warned_missing_endpoint:
+                    print(f"[Monitor] No endpoint configured for {rid}; neighbor relay skipped for that robot.")
+                    self._relay_warned_missing_endpoint.add(rid)
+                continue
+
+            host, _ = endpoint
+            vector, source_ids = self._build_other_robot_states(rid)
+            schedule_id = self.latest_packet[rid].schedule_id if rid in self.latest_packet else "schedule-default"
+            packet = NeighborStatesPacket(
+                robot_id=rid,
+                schedule_id=schedule_id,
+                t=time.time(),
+                other_robot_states=vector,
+                source_robot_ids=source_ids,
+            )
+            try:
+                self.peer_sock.sendto(packet_to_wire(packet), (host, NEIGHBOR_PORT))
+            except OSError as exc:
+                print(f"[Monitor] Failed to relay neighbor states to {rid} at {host}:{NEIGHBOR_PORT}: {exc}")
 
     def _handle_telemetry(self, packet: TelemetryPacket) -> None:
         rid = packet.robot_id
@@ -199,6 +325,8 @@ class MonitorNode:
             )
             self.shadow_visualizers[rid].update(*shadow_state)
 
+        self._relay_neighbor_states()
+
     def _save_actual_schedule(self) -> None:
         rows = []
         for rid, schedule in self.actual_timetable.items():
@@ -230,6 +358,8 @@ class MonitorNode:
             self._save_actual_schedule()
             self.plotter.close()
             self.sock.close()
+            if self.peer_sock is not None:
+                self.peer_sock.close()
 
 
 if __name__ == "__main__":

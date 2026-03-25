@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Union
 
 
 JsonDict = Dict[str, Any]
-PacketType = Union["MapPacket", "SchedulePacket", "TelemetryPacket", "StatusPacket"]
+PacketType = Union["MapPacket", "SchedulePacket", "TelemetryPacket", "StatusPacket", "NeighborStatesPacket"]
 
 
 
@@ -118,6 +118,35 @@ class TelemetryPacket:
 
 
 @dataclass
+class NeighborStatesPacket:
+    """Laptop-to-bot packet carrying the latest known trajectories of the other robots.
+
+    The payload is already flattened to the exact shape expected by the MPC solver:
+    `ns * (N_hor + 1) * Nother`.
+    """
+
+    robot_id: str
+    schedule_id: str
+    t: float
+    other_robot_states: List[float]
+    source_robot_ids: List[str]
+    kind: str = field(init=False, default="neighbor_states")
+
+    def to_payload(self) -> JsonDict:
+        return asdict(self)
+
+    @classmethod
+    def from_payload(cls, payload: JsonDict) -> "NeighborStatesPacket":
+        return cls(
+            robot_id=str(payload.get("robot_id", "unknown")),
+            schedule_id=str(payload.get("schedule_id", "schedule-default")),
+            t=float(payload.get("t", 0.0)),
+            other_robot_states=_float_list(payload.get("other_robot_states", [])),
+            source_robot_ids=[str(value) for value in payload.get("source_robot_ids", [])],
+        )
+
+
+@dataclass
 class StatusPacket:
     """Small status/event packet sent by the bot for visibility and debugging."""
 
@@ -151,6 +180,8 @@ def packet_from_payload(payload: JsonDict) -> PacketType:
         return SchedulePacket.from_payload(payload)
     if kind == "telemetry":
         return TelemetryPacket.from_payload(payload)
+    if kind == "neighbor_states":
+        return NeighborStatesPacket.from_payload(payload)
     if kind == "status":
         return StatusPacket.from_payload(payload)
     raise ValueError(f"Unsupported packet kind: {kind}")
