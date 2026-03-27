@@ -1,17 +1,23 @@
 """Stream Qualisys 6DoF bodies and forward planar pose to Duckiebots over UDP."""
 
 import asyncio
+import contextlib
 import json
 import math
 import os
 import socket
 import xml.etree.ElementTree as ET
+from importlib import resources
 from typing import Dict, Iterable, Tuple
 
-import pkg_resources
 import qtm
 
-QTM_FILE = pkg_resources.resource_filename("qtm", "data/Demo.qtm")
+with contextlib.ExitStack() as _resource_stack:
+    QTM_FILE = str(
+        _resource_stack.enter_context(
+            resources.as_file(resources.files("qtm").joinpath("data", "Demo.qtm"))
+        )
+    )
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -37,23 +43,19 @@ def body_enabled_count(xml_string):
     return sum(enabled.text == "true" for enabled in xml.findall("*/Body/Enabled"))
 
 
-def _load_targets() -> Dict[str, Tuple[str, int]]:
-    raw = os.getenv("MOCAP_TARGETS_JSON", "").strip()
-    if raw:
-        loaded = json.loads(raw)
-        targets = {}
-        for vehicle, endpoint in loaded.items():
-            if not isinstance(endpoint, dict):
-                raise ValueError(f"Target for '{vehicle}' must be an object with host/port.")
-            host = str(endpoint["host"])
-            port = int(endpoint["port"])
-            targets[str(vehicle)] = (host, port)
-        return targets
+def _bind_targets(
+    body_index: Dict[str, int], vehicles: Tuple[str, ...]
+) -> Tuple[Tuple[str, int], ...]:
+    bindings = []
+    for vehicle in vehicles:
+        wanted_index = body_index.get(vehicle)
+        if wanted_index is None:
+            print(f"Skipping target '{vehicle}': body not present in QTM 6DoF settings")
+            continue
 
-    wanted_body = os.getenv("MOCAP_WANTED_BODY", "duck2").strip()
-    target_host = os.getenv("MOCAP_TARGET_HOST", "192.168.1.12").strip() # Bot ip
-    target_port = int(os.getenv("MOCAP_TARGET_PORT", "5010"))
-    return {wanted_body: (target_host, target_port)}
+        bindings.append((vehicle, wanted_index))
+
+    return tuple(bindings)
 
 
 def _flatten_rotation(rotation: object) -> Iterable[float]:
@@ -90,11 +92,13 @@ def _planar_pose(position, rotation, pos_scale: float):
 
 
 async def main():
-    qtm_host = os.getenv("QTM_HOST", "192.168.1.8")
-    qtm_password = os.getenv("QTM_PASSWORD", "posequack")
-    realtime = _env_bool("QTM_REALTIME", True)
-    pos_scale = float(os.getenv("MOCAP_POS_SCALE", "0.001"))
-    targets = _load_targets()
+    qtm_host = "192.168.1.8"
+    qtm_password = "posequack"
+    realtime = True
+    pos_scale = 0.001
+    send_hz = 30.0
+    target = ("192.168.1.9", 5005)
+    vehicles = ("duck1", "duck2", "duck3", "duck4")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -104,29 +108,31 @@ async def main():
         return
 
     print(f"Connected to QTM at {qtm_host}")
-    print(f"Streaming mocap for vehicles: {', '.join(sorted(targets))}")
+    # print(f"Streaming mocap for vehicles: {', '.join(sorted(targets))}")
 
     async with qtm.TakeControl(connection, qtm_password):
         if realtime:
             await connection.new() # Start new realtime
-        else:
+        else: # TODO: Maybe remove this as we only work with realtime streaming
             await connection.load(QTM_FILE) # Load tqm file
             await connection.start(rtfromfile=True) # Start rtfromfile
 
+    # Get 6dof settings from qtm
     xml_string = await connection.get_parameters(parameters=["6d"])
     body_index = create_body_index(xml_string)
+    bound_targets = _bind_targets(body_index, vehicles)
+    latest_payload = None
 
     print(f"{body_enabled_count(xml_string)} of {len(body_index)} 6DoF bodies enabled")
+    print(f"Streaming mocap for vehicles: {', '.join(vehicle for vehicle, _ in bound_targets)}")
 
     def on_packet(packet):
+        nonlocal latest_payload
         info, bodies = packet.get_6d()
         packet_time = asyncio.get_event_loop().time()
+        poses = {}
 
-        for vehicle, endpoint in targets.items():
-            if vehicle not in body_index:
-                continue
-
-            wanted_index = body_index[vehicle]
+        for vehicle, wanted_index in bound_targets:
             if wanted_index >= info.body_count:
                 continue
 
@@ -137,23 +143,28 @@ async def main():
                 print(f"Skipping body '{vehicle}' due to rotation parse error: {exc}")
                 continue
 
-            payload = {
-                "vehicle": vehicle,
-                "stamp": packet_time,
+            poses[vehicle] = {
                 "x": x,
                 "y": y,
                 "theta": theta,
             }
-            print(
-                f"{vehicle} -> {endpoint[0]}:{endpoint[1]} | "
-                f"x={x:.3f} m, y={y:.3f} m, theta={theta:.3f} rad"
-            )
-            sock.sendto(json.dumps(payload).encode("utf-8"), endpoint)
+
+        latest_payload = {
+            "stamp": packet_time,
+            "poses": poses,
+        }
+
+    async def send_latest():
+        period_s = 1.0 / send_hz
+        while True:
+            if latest_payload is not None:
+                print(f"Sending {len(latest_payload['poses'])} poses -> {target[0]}:{target[1]}")
+                sock.sendto(json.dumps(latest_payload).encode("utf-8"), target)
+            await asyncio.sleep(period_s)
 
     try:
         await connection.stream_frames(components=["6d"], on_packet=on_packet)
-        while True:
-            await asyncio.sleep(1.0)
+        await send_latest()
     finally:
         await connection.stream_frames_stop()
         sock.close()
