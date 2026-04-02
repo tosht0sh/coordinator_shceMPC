@@ -199,7 +199,17 @@ class BotMpcNode(DTROS):
     def _on_pose(self, msg: Float64MultiArray) -> None:
         if len(msg.data) < 3:
             return
-        self._latest_pose = np.asarray(msg.data[:3], dtype=float)
+
+        pose = np.asarray(msg.data[:3], dtype=float)
+        # Reject non-finite samples here as a final safety net. The mocap relay
+        # and receiver should already drop bad packets, but keeping this guard in
+        # the control node prevents any upstream regression from poisoning the MPC
+        # state with NaNs.
+        if not np.all(np.isfinite(pose)):
+            rospy.logwarn_throttle(2.0, "Discarding non-finite pose sample on %s", self.pose_topic)
+            return
+
+        self._latest_pose = pose
         self._latest_pose_rx_time = rospy.get_time()
         self._pose_stale_stop_sent = False
 

@@ -97,7 +97,7 @@ async def main():
     realtime = True
     pos_scale = 0.001
     send_hz = 30.0
-    target = ("192.168.1.9", 5005)
+    target = ("192.168.1.10", 5005)
     vehicles = ("duck1", "duck2", "duck3", "duck4")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
