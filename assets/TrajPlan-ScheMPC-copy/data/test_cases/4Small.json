@@ -3,7 +3,7 @@
         "Big_number": 500,
         "Autonomy": 500,
         "charging_coefficient": 1,
-        "Environment": "SingleRobotEnv", 
+        "Environment": "TwoRobotEnv", 
         "nodes": {
               "N01":{"x":-20,"y":90,"next":["N02", "N11"]},
               "N02":{"x":-13,"y":90,"next":["N03", "N12", "N01"]},
