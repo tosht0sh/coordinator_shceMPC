@@ -27,7 +27,6 @@ from duckietown_msgs.msg import Twist2DStamped
 from std_msgs.msg import Float64MultiArray
 
 try:
-    from .PI_control_motors import PI
     from ._repo_paths import TRAJPLAN_CONFIG
     from .messages import (
         MapPacket,
@@ -40,7 +39,6 @@ try:
     )
     from .mpc_agent import MpcAgent
 except ImportError:
-    from PI_control_motors import PI
     from _repo_paths import TRAJPLAN_CONFIG
     from messages import (
         MapPacket,
@@ -68,7 +66,7 @@ class BotMpcNode(DTROS):
         super(BotMpcNode, self).__init__(node_name=node_name, node_type=NodeType.CONTROL)
 
         self.vehicle_name = os.environ["VEHICLE_NAME"]
-        pose_topic_template = os.getenv("MPC_POSE_TOPIC", f"/{self.vehicle_name}/pose_reader")
+        pose_topic_template = os.getenv("MPC_POSE_TOPIC", f"/{self.vehicle_name}/mocap_reader")
         self.pose_topic = (
             pose_topic_template.replace("{vehicle}", self.vehicle_name)
             .replace("{VEHICLE_NAME}", self.vehicle_name)
@@ -77,7 +75,7 @@ class BotMpcNode(DTROS):
 
         self.schedule_bind_ip = os.getenv("MPC_SCHEDULE_BIND_IP", "0.0.0.0")
         self.schedule_port = int(os.getenv("MPC_SCHEDULE_PORT", "5007"))
-        self.telemetry_ip = os.getenv("MPC_TELEMETRY_IP", os.getenv("LAPTOP_IP", "192.168.1.9"))
+        self.telemetry_ip = os.getenv("MPC_TELEMETRY_IP", os.getenv("LAPTOP_IP", "192.168.1.10"))
         self.telemetry_port = int(os.getenv("MPC_TELEMETRY_PORT", "5008"))
         self.neighbor_bind_ip = os.getenv("MPC_NEIGHBOR_BIND_IP", "0.0.0.0")
         self.neighbor_port = int(os.getenv("MPC_NEIGHBOR_PORT", "5009"))
@@ -86,7 +84,6 @@ class BotMpcNode(DTROS):
         self.ignore_speed_ref = _env_bool("MPC_IGNORE_SPEED_REF", False)
         self.report_cost = _env_bool("MPC_REPORT_COST", False)
         self.omega_scale = float(os.getenv("MPC_OMEGA_SCALE", "1.0"))
-        
 
         cfg_name = os.getenv("MPC_CFG_NAME", "mpc_fast.yaml")
         robot_cfg_name = os.getenv("MPC_ROBOT_CFG_NAME", "robot_spec.yaml")
@@ -104,7 +101,6 @@ class BotMpcNode(DTROS):
             monitor_cost=False,
             verbose=True,
         )
-        self.pi_controller = PI()
 
         self.pose_sub = rospy.Subscriber(self.pose_topic, Float64MultiArray, self._on_pose, queue_size=10)
         self.cmd_pub = rospy.Publisher(self.cmd_topic, Twist2DStamped, queue_size=1)
@@ -134,7 +130,6 @@ class BotMpcNode(DTROS):
             f"(timeout={self.neighbor_timeout:.2f}s)"
         )
         self.loginfo(f"Sending telemetry to {self.telemetry_ip}:{self.telemetry_port}")
-
 
     def _create_schedule_server(self) -> socket.socket:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -204,17 +199,7 @@ class BotMpcNode(DTROS):
     def _on_pose(self, msg: Float64MultiArray) -> None:
         if len(msg.data) < 3:
             return
-
-        pose = np.asarray(msg.data[:3], dtype=float)
-        # Reject non-finite samples here as a final safety net. The mocap relay
-        # and receiver should already drop bad packets, but keeping this guard in
-        # the control node prevents any upstream regression from poisoning the MPC
-        # state with NaNs.
-        if not np.all(np.isfinite(pose)):
-            rospy.logwarn_throttle(2.0, "Discarding non-finite pose sample on %s", self.pose_topic)
-            return
-
-        self._latest_pose = pose
+        self._latest_pose = np.asarray(msg.data[:3], dtype=float)
         self._latest_pose_rx_time = rospy.get_time()
         self._pose_stale_stop_sent = False
 
@@ -332,17 +317,6 @@ class BotMpcNode(DTROS):
             [float(action[0]), float(action[1]) * self.omega_scale],
             dtype=float,
         )
-
-        if self.pi_controller.is_ready():
-            corrected_v, corrected_omega = self.pi_controller.pi_controller(
-                float(published_action[0]),
-                float(published_action[1]),
-                self.config_mpc.ts,
-            )
-            published_action = np.asarray([corrected_v, corrected_omega], dtype=float)
-        else:
-            rospy.loginfo_throttle(2.0, "Wheel PI waiting for valid encoder updates; publishing raw MPC command.")
-
         msg = Twist2DStamped(v=float(published_action[0]), omega=float(published_action[1]))
         self.cmd_pub.publish(msg)
         self._last_action = published_action

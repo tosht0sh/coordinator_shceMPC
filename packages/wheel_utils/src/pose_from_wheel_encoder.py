@@ -223,16 +223,16 @@ class WheelEncoderReaderNode(DTROS):
 
                 if self._bias_ready:
                     msg = (
-                        f"Encoder pose [x, y, theta]: "
-                        f"{self.x:.3f}, {self.y:.3f}, {self.theta:.3f} | "
+                        # f"Encoder pose [x, y, theta]: "
+                        # f"{self.x:.3f}, {self.y:.3f}, {self.theta:.3f} | "
+                        f"ticks[l,r]: {self._ticks_left}, {self._ticks_right}"
                         # f"Angular Velocity (x,y,z): "
                         # f"({self._ang_vel.x:.3f}, {self._ang_vel.y:.3f}, {self._ang_vel.z:.3f}) | "
                         # f"Linear Acceleration (x,y,z): "
                         # f"({self._lin_acc.x:.3f}, {self._lin_acc.y:.3f}, {self._lin_acc.z:.3f})"
-                        f"Imu (angular velocity): "
-                        f"({self._ang_vel:.3f}) |"
-                        f"Kinematics Node (v, omega): "
-                        f"[{self._lin_vel_kn:.3f}, {self._ang_vel_kn:.3f}]"
+                        # f"Imu (angular velocity): "
+                        # f"Kinematics Node (v, omega): "
+                        # f"[{self._lin_vel_kn:.3f}, {self._ang_vel_kn:.3f}]"
                         
                     )
                     rospy.loginfo(msg)

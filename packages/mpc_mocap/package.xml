@@ -1,0 +1,11 @@
+<package>
+  <name>mpc_mocap</name>
+  <version>0.0.1</version>
+  <description>
+  Receive mocap pose data and run the onboard MPC runtime.
+  </description>
+  <maintainer email="YOUR_EMAIL@EXAMPLE.COM">YOUR_FULL_NAME</maintainer>
+  <license>None</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+</package>
