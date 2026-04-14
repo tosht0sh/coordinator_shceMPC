@@ -9,3 +9,6 @@ html/*
 *.resolved
 
 mpc_solver/*
+.venv/*
+
+*.codex

@@ -12,6 +12,16 @@ from typing import Dict, Iterable, Tuple
 
 import qtm
 
+# Tosh Laptop
+TARGET_IP = "192.168.1.9"       # target on which qtm coords are sent to
+
+# Kim Latop
+# TARGET_IP = "192.168.1.10"       # target on which qtm coords are sent to
+
+
+
+
+
 with contextlib.ExitStack() as _resource_stack:
     QTM_FILE = str(
         _resource_stack.enter_context(
@@ -59,6 +69,9 @@ def _bind_targets(
 
 
 def _flatten_rotation(rotation: object) -> Iterable[float]:
+    """
+    converts matrix to flat format
+    """
     raw = getattr(rotation, "matrix", rotation)
     if hasattr(raw, "_fields"):
         return [float(getattr(raw, field)) for field in raw._fields]
@@ -76,6 +89,9 @@ def _flatten_rotation(rotation: object) -> Iterable[float]:
 
 
 def _yaw_from_rotation(rotation: object) -> float:
+    """
+    extracts yaw from given rotation matrix
+    """
     values = list(_flatten_rotation(rotation))
     if len(values) != 9:
         raise ValueError(f"Expected 9 rotation-matrix values, got {len(values)}")
@@ -85,6 +101,11 @@ def _yaw_from_rotation(rotation: object) -> float:
 
 
 def _planar_pose(position, rotation, pos_scale: float):
+    """ 
+    convert received data to actual coordinates. does the following:
+    1. converts x,y from mm to m for use in MPC solver
+    2. extracts theta(yaw) from rotation matrix to angle
+    """
     x = float(position.x) * pos_scale
     y = float(position.y) * pos_scale
     theta = _yaw_from_rotation(rotation)
@@ -97,7 +118,7 @@ async def main():
     realtime = True
     pos_scale = 0.001
     send_hz = 30.0
-    target = ("192.168.1.10", 5005)
+    target = (TARGET_IP, 5005)
     vehicles = ("duck1", "duck2", "duck3", "duck4")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -108,7 +129,6 @@ async def main():
         return
 
     print(f"Connected to QTM at {qtm_host}")
-    # print(f"Streaming mocap for vehicles: {', '.join(sorted(targets))}")
 
     async with qtm.TakeControl(connection, qtm_password):
         if realtime:
@@ -138,7 +158,7 @@ async def main():
 
             position, rotation = bodies[wanted_index]
             try:
-                x, y, theta = _planar_pose(position, rotation, pos_scale)
+                x, y, theta = _planar_pose(position, rotation, pos_scale)  # convert matrixes to actual pose
             except (TypeError, ValueError) as exc:
                 print(f"Skipping body '{vehicle}' due to rotation parse error: {exc}")
                 continue
@@ -158,7 +178,7 @@ async def main():
         period_s = 1.0 / send_hz
         while True:
             if latest_payload is not None:
-                print(f"Sending {len(latest_payload['poses'])} poses -> {target[0]}:{target[1]}")
+                print(f"Sending {len(latest_payload['poses'])} poses to {target[0]}:{target[1]}")
                 sock.sendto(json.dumps(latest_payload).encode("utf-8"), target)
             await asyncio.sleep(period_s)
 
