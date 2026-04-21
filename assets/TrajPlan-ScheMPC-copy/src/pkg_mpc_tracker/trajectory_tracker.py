@@ -34,7 +34,15 @@ class Solver(Protocol): # this is not found in the .so file (in ternimal: nm -D 
 
     # Updated Solver class without opengen
     def run(self, p: list, initial_guess=None, initial_lagrange_multipliers=None, initial_penalty=None) -> Any: ...
-
+    # environment configs for UDP
+    #USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) # To run simulation with simulated data
+    # keep USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) if you want to use real data from
+    # the robot use USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", True)
+    # or export MPC_USE_UDP_STATE=1
+    # UDP_BIND_IP = os.getenv("MPC_UDP_BIND_IP", "0.0.0.0")
+    # UDP_PORT = int(os.getenv("MPC_UDP_PORT", "5005"))
+    # UDP_STATE_TIMEOUT = float(os.getenv("MPC_UDP_STATE_TIMEOUT", "0.5"))
+    # DEFAULT_VEHICLE = os.getenv("MPC_DEFAULT_VEHICLE", "").strip() or None
 class DebugInfo(TypedDict):
     cost: float
     closest_obstacle_list: list[list[PathNode]]
@@ -572,34 +580,9 @@ class TrajectoryTracker:
                 x_init = list(np.tile(state, N + 1))
                 # 2. Seed U: zeros is fine for inputs
                 u_init = [0.0] * (nu * N)
-                # 3. Seed Slacks: small positive value to help IPOPT interior point
-                # n_obs = self.config.Nstcobs + self.config.Ndynobs
-                # eps_init = [0.01] * (N * n_obs)
-                # eps_static_init = [1e-9] * (N * self.config.Nstcobs)
-                # eps_dynamic_init = [1e-9] * (N * self.config.Ndynobs)
+
                 initial_guess = x_init + u_init #+ eps_static_init + eps_dynamic_init
-            # --------------------------------
-            # rho_pen = 10.0
-            # p_eval = parameters + [rho_pen]
-            # # p used to be = parameters
-            # t0 = timer()
-            # sol = self._casadi_problem.solver(
-            #     x0=initial_guess,
-            #     p=p_eval,
-            #     lbx=self._casadi_problem.lbw,
-            #     ubx=self._casadi_problem.ubw,
-            #     lbg=self._casadi_problem.lbg,
-            #     ubg=self._casadi_problem.ubg,
-            # )
-            # solver_time = (timer() - t0) * 1000.0
 
-            # stats = self._casadi_problem.solver.stats()
-            # exit_status = str(stats.get("return_status", "UNKNOWN"))
-            # cost = float(sol["f"])
-
-            # w_opt = np.array(sol["x"]).reshape(-1).tolist()
-
-            # Added to test without slacks
 
             rho = 10.0
             rho_factor = 5.0
@@ -641,14 +624,7 @@ class TrajectoryTracker:
                 iter_count = stats.get("iter_count", "NA")
                 x_size = self.ns * (self.N_hor + 1)
                 u_size = self.nu * self.N_hor
-                # eps_stc_size = self.N_hor * self.config.Nstcobs
-                # eps_dyn_size = self.N_hor * self.config.Ndynobs
-                # eps_stc_start = x_size + u_size
-                # eps_dyn_start = eps_stc_start + eps_stc_size
-                # eps_stc = w_opt[eps_stc_start:eps_stc_start + eps_stc_size]
-                # eps_dyn = w_opt[eps_dyn_start:eps_dyn_start + eps_dyn_size]
-                # max_eps_stc = max(eps_stc) if eps_stc else 0.0
-                # max_eps_dyn = max(eps_dyn) if eps_dyn else 0.0
+
                 max_abs_state = max(abs(v) for v in w_opt[:x_size]) if x_size > 0 else 0.0
                 max_abs_input = max(abs(v) for v in w_opt[x_size:x_size + u_size]) if u_size > 0 else 0.0
                 print(
@@ -661,78 +637,11 @@ class TrajectoryTracker:
             u_size = self.nu * self.N_hor
             u = w_opt[x_size : x_size + u_size]
 
-            # Update the class initial guess for the NEXT step using your shift logic
-            # self._init_guess = CasadiNMPC.shift_warm_start(
-            #     w_opt,
-            #     ns=self.ns,
-            #     nu=self.nu,
-            #     N=self.N_hor,
-            #     n_stcobs=0, #self.config.Nstcobs,
-            #     n_dynobs=0, #self.config.Ndynobs,
-            # )
+
 
             self._init_guess = CasadiNMPC.shift_warm_start(
                 w_opt, ns=self.ns, nu=self.nu, N=self.N_hor
             )
-
-            # cas_solver = CasadiNMPC(self.config, self.robot_spec, parameters, self.next_initial_guess)
-            # u, cost, exit_status, solver_time, next_initial_guess = cas_solver.run()
-            # self.next_initial_guess = next_initial_guess
-            # if self._casadi_problem is None:
-            #     raise RuntimeError("Casadi solver is not built. Call load_motion_model(...) first.")
-
-            # if initial_guess is None or len(initial_guess) != len(self._casadi_problem.lbw):
-            #     initial_guess = [0.0] * len(self._casadi_problem.lbw)
-
-            # t0 = timer()
-            # sol = self._casadi_problem.solver(
-            #     x0=initial_guess,
-            #     p=parameters,
-            #     lbx=self._casadi_problem.lbw,
-            #     ubx=self._casadi_problem.ubw,
-            #     lbg=self._casadi_problem.lbg,
-            #     ubg=self._casadi_problem.ubg,
-            # )
-            # solver_time = (timer() - t0) * 1000.0
-
-            # stats = self._casadi_problem.solver.stats()
-            # exit_status = str(stats.get("return_status", "UNKNOWN"))
-            # cost = float(sol["f"])
-
-            # w_opt = np.array(sol["x"]).reshape(-1).tolist()
-
-            # # CasADi/IPOPT debug (solver status + slack magnitudes) for tuning.
-            # if self.vb:
-            #     iter_count = stats.get("iter_count", "NA")
-            #     x_size = self.ns * (self.N_hor + 1)
-            #     u_size = self.nu * self.N_hor
-            #     eps_stc_size = self.N_hor * self.config.Nstcobs
-            #     eps_dyn_size = self.N_hor * self.config.Ndynobs
-            #     eps_stc_start = x_size + u_size
-            #     eps_dyn_start = eps_stc_start + eps_stc_size
-            #     eps_stc = w_opt[eps_stc_start:eps_stc_start + eps_stc_size]
-            #     eps_dyn = w_opt[eps_dyn_start:eps_dyn_start + eps_dyn_size]
-            #     max_eps_stc = max(eps_stc) if eps_stc else 0.0
-            #     max_eps_dyn = max(eps_dyn) if eps_dyn else 0.0
-            #     print(
-            #         f"[CasadiDebug-{self.robot_id}] status={exit_status}, iter={iter_count}, "
-            #         f"max_eps_stc={max_eps_stc:.4g}, max_eps_dyn={max_eps_dyn:.4g}"
-            #     )
-
-            # x_size = self.ns * (self.N_hor + 1)
-            # u_size = self.nu * self.N_hor
-            # u = w_opt[x_size : x_size + u_size]
-
-            # # self._init_guess = w_opt
-            # self._init_guess = CasadiNMPC.shift_warm_start(
-            #                                             w_opt,
-            #                                             ns=self.ns,
-            #                                             nu=self.nu,
-            #                                             N=self.N_hor,
-            #                                             n_stcobs=self.config.Nstcobs,
-            #                                             n_dynobs=self.config.Ndynobs,
-            #                                         )
-
 
 
         else:

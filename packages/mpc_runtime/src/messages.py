@@ -32,7 +32,7 @@ def _float_3d(groups: List[Any]) -> List[List[List[float]]]:
 
 @dataclass
 class MapPacket:
-    """Map payload sent from laptop to bot for onboard replanning."""
+    """Map data message sent from laptop to bot for onboard replanning."""
 
     map_id: str
     boundary_coords: List[List[float]]
@@ -53,7 +53,7 @@ class MapPacket:
 
 @dataclass
 class SchedulePacket:
-    """Robot-specific path and timing payload sent from laptop to bot."""
+    """Robot-specific path and timing data sent from laptop to bot."""
 
     robot_id: str
     schedule_id: str
@@ -121,7 +121,7 @@ class TelemetryPacket:
 class NeighborStatesPacket:
     """Laptop-to-bot packet carrying the latest known trajectories of the other robots.
 
-    The payload is already flattened to the exact shape expected by the MPC solver:
+    The data is already flattened to the exact shape expected by the MPC solver:
     `ns * (N_hor + 1) * Nother`.
     """
 
