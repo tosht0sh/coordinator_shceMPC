@@ -83,7 +83,7 @@ class BotMpcNode(DTROS):
         super(BotMpcNode, self).__init__(node_name=node_name, node_type=NodeType.CONTROL)
 
         self.vehicle_name = os.environ["VEHICLE_NAME"]
-        pose_topic_template = os.getenv("MPC_POSE_TOPIC", f"/{self.vehicle_name}/pose_reader")
+        pose_topic_template = os.getenv("MPC_POSE_TOPIC", f"/{self.vehicle_name}/mocap_reader")
         self.pose_topic = (
             pose_topic_template.replace("{vehicle}", self.vehicle_name)
             .replace("{VEHICLE_NAME}", self.vehicle_name)

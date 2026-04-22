@@ -97,7 +97,7 @@ def _yaw_from_rotation(rotation: object) -> float:
         raise ValueError(f"Expected 9 rotation-matrix values, got {len(values)}")
 
     # Assumes a standard 3x3 row-major rotation matrix for a Z-up world.
-    return math.atan2(values[3], values[0])
+    return math.atan2(-values[3], values[0])
 
 
 def _planar_pose(position, rotation, pos_scale: float):
@@ -108,6 +108,11 @@ def _planar_pose(position, rotation, pos_scale: float):
     """
     x = float(position.x) * pos_scale
     y = float(position.y) * pos_scale
+    #print("Rotation matrix: ",rotation[0])
+    # raw = getattr(rotation, "matrix", rotation)
+    # #print("Raw data ",raw[0])
+    # raw2 = math.atan2(-raw[3],raw[0])
+    # print("Raw all  ", raw2)
     theta = _yaw_from_rotation(rotation)
     return x, y, theta
 

@@ -35,7 +35,7 @@ SCHEDULE_VARIANT = os.getenv("MPC_SCHEDULE_VARIANT", "SingleRobot")
 SEND_MAP = os.getenv("MPC_SEND_MAP", "1").strip().lower() in {"1", "true", "yes", "on"}
 DISPATCH_TIMEOUT = float(os.getenv("MPC_DISPATCH_TIMEOUT", "5.0"))
 DEFAULT_BOT_PORT = int(os.getenv("MPC_DEFAULT_BOT_PORT", "5007"))
-DEFAULT_BOT_HOST = os.getenv("MPC_DEFAULT_BOT_HOST", "")
+DEFAULT_BOT_HOST = os.getenv("MPC_DEFAULT_BOT_HOST", "192.168.1.12")
 
 
 
@@ -137,9 +137,9 @@ class SchedulerDispatcher:
         map_packet = self.build_map_packet()
         for robot_id in self.robot_ids:
             rid = str(robot_id)
-            # host = "192.168.1.102" # Robots ip
-            # port = 5007
-            host, port = self._endpoint_for(rid)
+            host = "192.168.1.11" # Robots ip
+            port = 5007
+            # host, port = self._endpoint_for(rid)
 
             schedule_packet = self.build_schedule_packet(robot_id)
             with socket.create_connection((host, port), timeout=DISPATCH_TIMEOUT) as sock:
