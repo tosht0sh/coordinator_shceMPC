@@ -7,7 +7,8 @@ import time
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # Bind on the laptop-side data IP so the QTM stream can target this relay.
-sock.bind(("192.168.1.9", 5005))
+sock.bind(("192.168.1.9", 5005))        # tosh
+# sock.bind(("192.168.1.10", 5005))       # kim
 sock.setblocking(False)
 
 # Each vehicle should only be forwarded to its own bot. Sending every vehicle to

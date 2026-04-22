@@ -17,10 +17,9 @@ class MocapPoseReceiverNode(DTROS):
         super(MocapPoseReceiverNode, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
 
         self._vehicle_name = os.environ["VEHICLE_NAME"]
-        self._bind_ip = os.getenv("MOCAP_BIND_IP", "0.0.0.0")
-        self._port = int(os.getenv("MOCAP_PORT", "5005"))
+        self._bind_ip = "0.0.0.0"
+        self._port = 5005
         self._stale_timeout = float(os.getenv("MOCAP_STALE_TIMEOUT", "0.5"))
-        self._source_ip = os.getenv("MOCAP_SOURCE_IP", "").strip() or None
 
         self._publish_topic = f"/{self._vehicle_name}/mocap_reader"
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -33,14 +32,8 @@ class MocapPoseReceiverNode(DTROS):
 
         self.loginfo(f"Listening for mocap UDP on {self._bind_ip}:{self._port}")
         self.loginfo(f"Publishing mocap pose on {self._publish_topic}")
-        if self._source_ip is not None:
-            self.loginfo(f"Accepting mocap packets only from {self._source_ip}")
 
     def _handle_packet(self, packet, sender):
-        sender_ip = sender[0]
-        if self._source_ip is not None and sender_ip != self._source_ip:
-            return
-
         try:
             data = json.loads(packet.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):

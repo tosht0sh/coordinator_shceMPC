@@ -14,25 +14,32 @@ The folder currently packages currently made are:
 2. Wheel encoder and wheel control node
 3. Imu reader node
 
+### TODOs:
+
+1. Code cleanup
+2. Bot sided MPC Mocap merge verification
+3. Other robot states outside monitor_node.py
+4. 
+
 # Places we need to change settings
 
-## MOCAP
+## Laptop
 
-    1. /assets/mocap/stream.py 
-        - only ip adress, to be done at top after imports.
-    2. /assests/mocap/pose_receiver.py
-        - line 10
+1. /assets/mocap/stream.py 
+    - only ip adress, to be done at top after imports.
+2. /assests/mocap/pose_receiver.py
+    - line 10
+3. 4Small.json
+    - rad 6
+4. /assets/TrajPlan-ScheMPC-copy/src/neighbour_relay_node.py
+    - rad 36
+    - rad 43
+        - check ip adresses match the current number of bots and the ip adresses used are correct
 
+## Bot
 
-## Scheduler(depending on the number of bots being used in demo)
-
-    1. 4Small.json
-        - rad 6
-
-## Bot info
-
-    1. /packages/mpc_runtime/src/bot_mpc_node.py
-        - rad 80
+1. /packages/mpc_runtime/src/bot_mpc_node.py
+    - rad 80
 
 # IP adresses for routing
 
