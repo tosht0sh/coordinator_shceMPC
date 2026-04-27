@@ -381,7 +381,7 @@ class TrajectoryTracker:
         """
         if external_check:
             self.finishing = True
-            if np.allclose(self.state[:2], self.final_goal[:2], atol=0.5, rtol=0) and abs(self.past_actions[-1][0]) < 0.1:
+            if np.allclose(self.state[:2], self.final_goal[:2], atol=0.25, rtol=0) and abs(self.past_actions[-1][0]) < 0.05: #0.1 atol=0.5
                 self._idle = True
                 if self.vb:
                     print(f"[{self.__class__.__name__}-{self.robot_id}] Trajectory tracking finished.")
@@ -630,6 +630,7 @@ class TrajectoryTracker:
                 print(
                     f"[CasadiDebug-{self.robot_id}] status={exit_status}, iter={iter_count}, "
                     f"max|X|={max_abs_state:.4g}, max|U|={max_abs_input:.4g}, rho_pen={rho:.4g}"
+                    f"Cost: {cost}"
                     # f"max_eps_stc={max_eps_stc:.4g}, max_eps_dyn={max_eps_dyn:.4g}"
                 )
 

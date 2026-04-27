@@ -418,6 +418,7 @@ class BotMpcNode(DTROS):
                 f"[mpc_runtime data] pose=({pose[0]:.3f}, {pose[1]:.3f}, {pose[2]:.3f}) "
                 f"cmd=({cmd[0]:.3f}, {cmd[1]:.3f}) "
                 f"peer_sources={self._latest_neighbor_sources or []} idle={step_result['controller_idle']}"
+                f"mpc_cost {self.report_cost:.3f}"
             )
 
             self._send_telemetry(step_result)
