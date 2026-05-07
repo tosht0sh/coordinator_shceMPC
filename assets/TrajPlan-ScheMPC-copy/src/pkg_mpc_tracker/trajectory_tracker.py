@@ -110,6 +110,8 @@ class TrajectoryTracker:
         self._mode: str = 'none'
         self._map_loaded = False
         self._init_guess = [0.0]*self.nu*self.N_hor
+        self._last_measured_theta_wrapped: Optional[float] = None
+        self._last_measured_theta_continuous: Optional[float] = None
         self._obstacle_weights()
         self.set_work_mode(mode='safe', use_predefined_speed=True)
 
@@ -264,10 +266,14 @@ class TrajectoryTracker:
 
         if (not isinstance(current_state, np.ndarray)) or (not isinstance(goal_state, np.ndarray)):
             raise TypeError(f'State should be numpy.ndarry, got {type(current_state)}/{type(goal_state)}.')
-        self.state = current_state
-        self.final_goal = goal_state
+        state_continuous = np.array(current_state, dtype=float, copy=True)
+        state_continuous[2] = float(current_state[2])
+        self.state = state_continuous
+        self.final_goal = np.array(goal_state, dtype=float, copy=True)
+        self._last_measured_theta_wrapped = self.wrap_to_pi(float(current_state[2]))
+        self._last_measured_theta_continuous = float(state_continuous[2])
 
-        self.past_states: list[np.ndarray] = [current_state]
+        self.past_states: list[np.ndarray] = [state_continuous.copy()]
         self.past_actions: list[np.ndarray] = []
         self.cost_timelist: list[float] = []
         self.solver_time_timelist: list[float] = []
@@ -352,7 +358,18 @@ class TrajectoryTracker:
         """
         if not isinstance(current_state, np.ndarray):
             raise TypeError(f'State should be numpy.ndarry, got {type(current_state)}.')
-        self.state = current_state
+        state_continuous = np.array(current_state, dtype=float, copy=True)
+        measured_theta_wrapped = self.wrap_to_pi(float(state_continuous[2]))
+        if self._last_measured_theta_wrapped is None or self._last_measured_theta_continuous is None:
+            measured_theta_continuous = measured_theta_wrapped
+        else:
+            delta_theta = self.wrap_to_pi(measured_theta_wrapped - self._last_measured_theta_wrapped)
+            measured_theta_continuous = self._last_measured_theta_continuous + delta_theta
+
+        state_continuous[2] = measured_theta_continuous
+        self._last_measured_theta_wrapped = measured_theta_wrapped
+        self._last_measured_theta_continuous = measured_theta_continuous
+        self.state = state_continuous
 
     def set_ref_states(self, ref_states: np.ndarray, ref_speed:Optional[float]=None):
         """Set the local reference states for the coming time step.
@@ -447,7 +464,7 @@ class TrajectoryTracker:
             other_robot_states = [-10] * (self.ns*(self.N_hor+1)*self.config.Nother)
 
         ### Get reference states ###
-        ref_states = self.ref_states.copy()
+        ref_states = self._unwrap_reference_states(self.ref_states.copy())
         finish_state = ref_states[-1,:]
         current_refs = ref_states.reshape(-1).tolist()
 
@@ -467,8 +484,8 @@ class TrajectoryTracker:
         current_ref_theta = math.degrees(ref_states[0, 2]) % 360
         current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
         current_theta = math.degrees(self.state[2]) % 360
-        theta_diff = self.angle_diff(current_ref_theta, current_theta)
-        theta_diff_last = self.angle_diff(current_ref_theta_last, current_theta)
+        theta_diff = float(self.angle_diff(current_ref_theta, current_theta))
+        theta_diff_last = float(self.angle_diff(current_ref_theta_last, current_theta))
         # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
         #     self.set_work_mode(mode='aligning')
         # elif theta_diff > 60:
@@ -477,12 +494,16 @@ class TrajectoryTracker:
         
         if theta_diff > 100: # and theta_diff_last > 90:
             self.set_work_mode(mode='aligning')
+            if not ignore_speed_ref:
+                # Large heading errors are better handled as an in-place alignment
+                # problem; asking for forward travel here tends to produce arcs/spins.
+                speed_ref_list = [0.0] * self.N_hor
         else:
             self.set_work_mode(mode='work', use_predefined_speed=False)
 
         ### Check if turning around ###
-        mid_idx = 0
-        ref_theta_diff = self.angle_diff(current_ref_theta, current_ref_theta_last)
+        mid_idx = min(3, self.N_hor - 1)
+        ref_theta_diff = float(self.angle_diff(current_ref_theta, current_ref_theta_last))
         if (ref_theta_diff > 170):
             all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
             all_theta_diffs = self.angle_diff(all_ref_thetas, current_theta)
@@ -583,6 +604,7 @@ class TrajectoryTracker:
 
                 initial_guess = x_init + u_init #+ eps_static_init + eps_dynamic_init
 
+            initial_guess = self._rebranch_warm_start(initial_guess, state)
 
             rho = 10.0
             rho_factor = 5.0
@@ -713,9 +735,48 @@ class TrajectoryTracker:
         
     @staticmethod
     def angle_diff(a, b):
-        diff = np.array(abs(a - b)) 
-        diff[diff > 180] = 360 - diff[diff > 180] # if the angle difference is larger than 180, use the other direction
+        diff = np.abs(np.asarray(a, dtype=float) - np.asarray(b, dtype=float))
+        diff = np.where(diff > 180.0, 360.0 - diff, diff)
+        if diff.ndim == 0:
+            return float(diff)
         return diff
+
+    @staticmethod
+    def wrap_to_pi(angle):
+        wrapped = (np.asarray(angle, dtype=float) + np.pi) % (2.0 * np.pi) - np.pi
+        if np.ndim(wrapped) == 0:
+            return float(wrapped)
+        return wrapped
+
+    def _unwrap_reference_states(self, ref_states: np.ndarray) -> np.ndarray:
+        if ref_states.shape[0] == 0:
+            return ref_states
+
+        ref_states = np.array(ref_states, dtype=float, copy=True)
+        ref_states[0, 2] = self.state[2] + self.wrap_to_pi(ref_states[0, 2] - self.state[2])
+        for idx in range(1, ref_states.shape[0]):
+            ref_states[idx, 2] = ref_states[idx - 1, 2] + self.wrap_to_pi(ref_states[idx, 2] - ref_states[idx - 1, 2])
+        return ref_states
+
+    def _rebranch_warm_start(self, initial_guess: list[float], state: np.ndarray) -> list[float]:
+        if self._casadi_problem is None or len(initial_guess) != len(self._casadi_problem.lbw):
+            return initial_guess
+
+        rebranched = list(initial_guess)
+        x_size = self.ns * (self.N_hor + 1)
+        if x_size == 0:
+            return rebranched
+
+        rebranched[:self.ns] = list(np.asarray(state, dtype=float))
+        theta_anchor = float(state[2])
+        for step in range(self.N_hor + 1):
+            theta_idx = step * self.ns + 2
+            if theta_idx >= x_size:
+                break
+            theta_value = rebranched[theta_idx]
+            rebranched[theta_idx] = theta_anchor + self.wrap_to_pi(theta_value - theta_anchor)
+            theta_anchor = rebranched[theta_idx]
+        return rebranched
 
     @staticmethod
     def lineseg_dists(points: np.ndarray, line_points_1: np.ndarray, line_points_2: np.ndarray) -> np.ndarray:

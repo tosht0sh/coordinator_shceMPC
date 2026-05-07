@@ -60,14 +60,18 @@ def _env_bool(name: str, default: bool = False) -> bool:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
+
+def _wrap_to_pi(theta: float) -> float:
+    return ((theta + np.pi) % (2.0 * np.pi)) - np.pi
+
 # Scheduler: Bot listens to laptop 
 
 BOT_SCHEDULE_LISTEN_IP = "0.0.0.0" # Bot/Bots Ip
 BOT_SCHEDULE_LISTENER_PORT = 5007
 
 # Telemetry: Bot sends telemetry to laptop
-# LAPTOP_TELEMETRY_IP = "192.168.1.9" # Tosh ip
-LAPTOP_TELEMETRY_IP = "192.168.1.10" # Kim ip
+LAPTOP_TELEMETRY_IP = "192.168.1.9" # Tosh ip
+# LAPTOP_TELEMETRY_IP = "192.168.1.10" # Kim ip
 LAPTOP_TELEMETRY_PORT = 5008
 
 
@@ -222,6 +226,7 @@ class BotMpcNode(DTROS):
             rospy.logwarn_throttle(2.0, "Discarding non-finite pose sample on %s", self.pose_topic)
             return
 
+        pose[2] = _wrap_to_pi(float(pose[2]))
         self._latest_pose = pose
         self._latest_pose_rx_time = rospy.get_time()
         self._pose_stale_stop_sent = False
@@ -338,11 +343,17 @@ class BotMpcNode(DTROS):
                 return
             self._handle_neighbor_packet(packet, sender)
 
+    def _clip_action(self, action: np.ndarray) -> np.ndarray:
+        clipped = np.asarray(action, dtype=float).copy()
+        clipped[0] = np.clip(clipped[0], self.config_robot.lin_vel_min, self.config_robot.lin_vel_max)
+        clipped[1] = np.clip(clipped[1], -self.config_robot.ang_vel_max, self.config_robot.ang_vel_max)
+        return clipped
+
     def _publish_action(self, action: np.ndarray) -> None:
-        published_action = np.asarray(
+        published_action = self._clip_action(np.asarray(
             [float(action[0]), float(action[1]) * self.omega_scale],
             dtype=float,
-        )
+        ))
 
         if self.pi_controller.is_ready():
             corrected_v, corrected_omega = self.pi_controller.pi_controller(
@@ -350,7 +361,7 @@ class BotMpcNode(DTROS):
                 float(published_action[1]),
                 self.config_mpc.ts,
             )
-            published_action = np.asarray([corrected_v, corrected_omega], dtype=float)
+            published_action = self._clip_action(np.asarray([corrected_v, corrected_omega], dtype=float))
         else:
             rospy.loginfo_throttle(2.0, "Wheel PI waiting for valid encoder updates; publishing raw MPC command.")
 

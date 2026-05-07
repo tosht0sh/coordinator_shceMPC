@@ -136,6 +136,13 @@ class CasadiNMPC:
         y0 = self._c_0[1:: self.ns]
         return ca.hcat([x0, y0]).T
 
+    @staticmethod
+    def _wrapped_angle_error(theta: ca.SX, theta_ref: ca.SX) -> ca.SX:
+        """Return the shortest signed angular difference in [-pi, pi]."""
+
+        delta = theta - theta_ref
+        return ca.atan2(ca.sin(delta), ca.cos(delta))
+
     def _stage_cost(self, k: int, x_next: ca.SX, u_k: ca.SX, ref_states: ca.SX) -> ca.SX:
         """Per-step cost. Mirrors PanocBuilder terms as soft penalties."""
         cts = mc.CostTerms()
@@ -144,7 +151,8 @@ class CasadiNMPC:
         ### the term ||u_k - u_k-1 || is performed in build().
         cts.cost_rpd = mc.cost_refpath_deviation(x_next, ref_states[:2, :], weight=self._q_terms["rpd"]) # state in x,y
         cts.cost_rvd = self._q_terms["vel"] * (u_k[0] - self._r_v[k]) ** 2 # control action term
-        cts.cost_rtd = self._q_terms["theta"] * (x_next[2] - ref_states[2, 0]) ** 2 # state in theta
+        theta_error = self._wrapped_angle_error(x_next[2], ref_states[2, 0])
+        cts.cost_rtd = self._q_terms["theta"] * theta_error**2 # state in theta
         cts.cost_input = ca.sum1(ca.vertcat(self._q_terms["v"], self._q_terms["w"]) * u_k**2) # ||u_k||Q_u
 
         ### Fleet collision avoidance: J_f =  max(0,Q_f * (d_fleet - distance))**2
@@ -370,7 +378,8 @@ class CasadiNMPC:
 
         x_N = X[self.N_hor * self.ns : (self.N_hor + 1) * self.ns]
         total_cost += self._q_terms["posN"] * ((x_N[0] - self._s_N[0]) ** 2 + (x_N[1] - self._s_N[1]) ** 2)
-        total_cost += self._q_terms["thetaN"] * (x_N[2] - self._s_N[2]) ** 2
+        theta_terminal_error = self._wrapped_angle_error(x_N[2], self._s_N[2])
+        total_cost += self._q_terms["thetaN"] * theta_terminal_error**2
 
         for k in range(self.N_hor):
             uk_start = self.ns * (self.N_hor + 1) + k * self.nu
