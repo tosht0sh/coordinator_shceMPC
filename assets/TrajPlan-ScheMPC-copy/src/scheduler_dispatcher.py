@@ -137,7 +137,7 @@ class SchedulerDispatcher:
         map_packet = self.build_map_packet()
         for robot_id in self.robot_ids:
             rid = str(robot_id)
-            host = "192.168.1.12" # Robots ip
+            host = "192.168.1.11" # Robots ip
             port = 5007
             # host, port = self._endpoint_for(rid)
 

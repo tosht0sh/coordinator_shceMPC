@@ -158,8 +158,8 @@ class CasadiNMPC:
 
         ### Fleet collision avoidance: J_f =  max(0,Q_f * (d_fleet - distance))**2
         ### used from mpc_cost, cost_fleet_collision.
-        safe_distance = 0.30 #2 * (self._spec.vehicle_width + self._spec.vehicle_margin)
-        critical_distance = 0.10 #2 * self._spec.vehicle_width + self._spec.vehicle_margin
+        safe_distance = 0.5 #2 * (self._spec.vehicle_width + self._spec.vehicle_margin)
+        critical_distance = 0.30 #2 * self._spec.vehicle_width + self._spec.vehicle_margin
         if k < self._critical_step:
             cts.cost_fleet = mc.cost_fleet_collision(
                 x_next[:2],

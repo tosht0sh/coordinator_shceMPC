@@ -8,11 +8,21 @@ social_margin: 0.2   # Vehicle extra social margin for soft loss terms
 
 ### Robot Specification (kinematic parameters) 
 ### USE this for real robot
+
+### DUCK 1 ###
+# lin_vel_min: -0.4 #Vehicle contraint on the minimal velocity possible
+# lin_vel_max: 0.40    # Vehicle contraint on the maximal velocity possible
+# lin_acc_min: -2.0 #-0.60   # Vehicle contraint on the maximal linear retardation
+# lin_acc_max: 2.0 #0.60       # Vehicle contraint on the maximal linear acceleration
+# ang_vel_max: 4.0 #1.5  # Vehicle contraint on the maximal angular velocity
+# ang_acc_max: 8.0 #3.0   # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
+
+### DUCK 2 ###
 lin_vel_min: -0.4 #Vehicle contraint on the minimal velocity possible
 lin_vel_max: 0.40    # Vehicle contraint on the maximal velocity possible
 lin_acc_min: -2.0 #-0.60   # Vehicle contraint on the maximal linear retardation
 lin_acc_max: 2.0 #0.60       # Vehicle contraint on the maximal linear acceleration
-ang_vel_max: 4.0 #1.5  # Vehicle contraint on the maximal angular velocity
+ang_vel_max: 4.5 #1.5  # Vehicle contraint on the maximal angular velocity
 ang_acc_max: 8.0 #3.0   # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
 
 

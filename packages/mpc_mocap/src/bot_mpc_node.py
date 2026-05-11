@@ -75,7 +75,7 @@ class BotMpcNode(DTROS):
 
         self.schedule_bind_ip = os.getenv("MPC_SCHEDULE_BIND_IP", "0.0.0.0")
         self.schedule_port = int(os.getenv("MPC_SCHEDULE_PORT", "5007"))
-        self.telemetry_ip = os.getenv("MPC_TELEMETRY_IP", os.getenv("LAPTOP_IP", "192.168.1.9"))
+        self.telemetry_ip = os.getenv("MPC_TELEMETRY_IP", os.getenv("LAPTOP_IP", "192.168.1.10"))
         self.telemetry_port = int(os.getenv("MPC_TELEMETRY_PORT", "5008"))
         self.neighbor_bind_ip = os.getenv("MPC_NEIGHBOR_BIND_IP", "0.0.0.0")
         self.neighbor_port = int(os.getenv("MPC_NEIGHBOR_PORT", "5009"))

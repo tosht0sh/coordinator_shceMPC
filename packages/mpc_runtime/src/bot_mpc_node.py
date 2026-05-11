@@ -70,7 +70,7 @@ BOT_SCHEDULE_LISTEN_IP = "0.0.0.0" # Bot/Bots Ip
 BOT_SCHEDULE_LISTENER_PORT = 5007
 
 # Telemetry: Bot sends telemetry to laptop
-LAPTOP_TELEMETRY_IP = "192.168.1.9" # Tosh ip
+LAPTOP_TELEMETRY_IP = "192.168.1.10" # Tosh ip
 # LAPTOP_TELEMETRY_IP = "192.168.1.10" # Kim ip
 LAPTOP_TELEMETRY_PORT = 5008
 
@@ -117,6 +117,9 @@ class BotMpcNode(DTROS):
             monitor_cost=False,
             verbose=True,
         )
+
+        
+
         self.pi_controller = PI()
 
         self.pose_sub = rospy.Subscriber(self.pose_topic, Float64MultiArray, self._on_pose, queue_size=10)

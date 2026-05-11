@@ -13,7 +13,7 @@ from typing import Dict, Iterable, Tuple
 import qtm
 
 # Tosh Laptop
-TARGET_IP = "192.168.1.9"       # target on which qtm coords are sent to
+TARGET_IP = "192.168.1.10"       # target on which qtm coords are sent to
 
 # Kim Latop
 # TARGET_IP = "192.168.1.10"       # target on which qtm coords are sent to
@@ -142,6 +142,7 @@ async def main():
             await connection.load(QTM_FILE) # Load tqm file
             await connection.start(rtfromfile=True) # Start rtfromfile
 
+    
     # Get 6dof settings from qtm
     xml_string = await connection.get_parameters(parameters=["6d"])
     body_index = create_body_index(xml_string)
