@@ -146,6 +146,7 @@ class CasadiNMPC:
     def _stage_cost(self, k: int, x_next: ca.SX, u_k: ca.SX, ref_states: ca.SX) -> ca.SX:
         """Per-step cost. Mirrors PanocBuilder terms as soft penalties."""
         cts = mc.CostTerms()
+        theta_err = mh.angle_error(x_next[2], ref_states[2, 0])
 
         ### Reference deviation costs J_R =||s_k- s(tilde)_k ||*Qs + ||u_k - u(tilde)_k||
         ### the term ||u_k - u_k-1 || is performed in build().
@@ -157,8 +158,8 @@ class CasadiNMPC:
 
         ### Fleet collision avoidance: J_f =  max(0,Q_f * (d_fleet - distance))**2
         ### used from mpc_cost, cost_fleet_collision.
-        safe_distance = 2 * (self._spec.vehicle_width + self._spec.vehicle_margin)
-        critical_distance = 2 * self._spec.vehicle_width + self._spec.vehicle_margin
+        safe_distance = 0.30 #2 * (self._spec.vehicle_width + self._spec.vehicle_margin)
+        critical_distance = 0.10 #2 * self._spec.vehicle_width + self._spec.vehicle_margin
         if k < self._critical_step:
             cts.cost_fleet = mc.cost_fleet_collision(
                 x_next[:2],
@@ -377,6 +378,7 @@ class CasadiNMPC:
             prev_w = u_k[1]
 
         x_N = X[self.N_hor * self.ns : (self.N_hor + 1) * self.ns]
+        theta_terminal_err = mh.angle_error(x_N[2], self._s_N[2])
         total_cost += self._q_terms["posN"] * ((x_N[0] - self._s_N[0]) ** 2 + (x_N[1] - self._s_N[1]) ** 2)
         theta_terminal_error = self._wrapped_angle_error(x_N[2], self._s_N[2])
         total_cost += self._q_terms["thetaN"] * theta_terminal_error**2

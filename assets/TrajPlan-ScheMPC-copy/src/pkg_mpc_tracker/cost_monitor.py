@@ -4,6 +4,7 @@ from timeit import default_timer as timer
 import casadi as ca # type: ignore
 
 from .casadi_build import mpc_cost as mc
+from .casadi_build import mpc_helper as mh
 from .casadi_build.mpc_cost import CostTerms
 
 from configs import MpcConfiguration, CircularRobotSpecification
@@ -164,7 +165,8 @@ class CostMonitor:
             state, step_cost = self._get_step_cost(kt, ca.SX(state))
             step_cost_list.append(step_cost)
             total_cost += step_cost
-        terminal_cost = self._q_terms['posN']*((state[0]-self._s_N[0])**2 + (state[1]-self._s_N[1])**2) + self._q_terms['thetaN']*(state[2]-self._s_N[2])**2 # terminated cost
+        theta_terminal_err = mh.angle_error(state[2], self._s_N[2])
+        terminal_cost = self._q_terms['posN']*((state[0]-self._s_N[0])**2 + (state[1]-self._s_N[1])**2) + self._q_terms['thetaN']*theta_terminal_err**2 # terminated cost
         terminal_cost = float(terminal_cost)
 
         v = self._u[0::2] # velocity

@@ -106,6 +106,7 @@ def cost_fleet_collision(state: ca.SX, points: ca.SX, safe_distance: float, weig
         Only have cost when the distance is smaller than `safe_distance`.
     """
     cost:ca.SX = weight * ca.sum2(ca.fmax(0.0, safe_distance**2 - dist_to_points_square(state, points)))
+    print("I'm colliding!")
     assert cost.shape == (1,1)
     return cost
 

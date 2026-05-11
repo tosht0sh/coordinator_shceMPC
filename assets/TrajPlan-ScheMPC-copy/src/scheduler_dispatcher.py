@@ -35,7 +35,7 @@ SCHEDULE_VARIANT = os.getenv("MPC_SCHEDULE_VARIANT", "SingleRobot")
 SEND_MAP = os.getenv("MPC_SEND_MAP", "1").strip().lower() in {"1", "true", "yes", "on"}
 DISPATCH_TIMEOUT = float(os.getenv("MPC_DISPATCH_TIMEOUT", "5.0"))
 DEFAULT_BOT_PORT = int(os.getenv("MPC_DEFAULT_BOT_PORT", "5007"))
-DEFAULT_BOT_HOST = os.getenv("MPC_DEFAULT_BOT_HOST", "192.168.1.12")
+DEFAULT_BOT_HOST = os.getenv("MPC_DEFAULT_BOT_HOST", "192.168.1.11")
 
 
 

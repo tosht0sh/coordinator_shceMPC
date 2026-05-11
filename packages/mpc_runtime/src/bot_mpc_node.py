@@ -460,7 +460,7 @@ class BotMpcNode(DTROS):
             pose = self._latest_pose
             cmd = self._last_action
             rospy.loginfo_throttle(
-                1.0,
+                self.config_mpc.ts,
                 f"[mpc_runtime data] pose=({pose[0]:.3f}, {pose[1]:.3f}, {pose[2]:.3f}) "
                 f"cmd=({cmd[0]:.3f}, {cmd[1]:.3f}) "
                 f"peer_sources={self._latest_neighbor_sources or []} idle={step_result['controller_idle']}"

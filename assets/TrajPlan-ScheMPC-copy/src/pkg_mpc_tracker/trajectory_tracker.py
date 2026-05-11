@@ -468,7 +468,8 @@ class TrajectoryTracker:
         finish_state = ref_states[-1,:]
         current_refs = ref_states.reshape(-1).tolist()
 
-        ### Get reference velocities ###
+        ### Get reference velocities ### 
+        ### Remove the if statement statement entirly to remove slow down before goal
         dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
         if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
             speed_ref = dist_to_goal / self.N_hor / self.ts * 2
@@ -510,6 +511,7 @@ class TrajectoryTracker:
             try:
                 turn_idx = np.where(all_theta_diffs>170)[0][0]
             except IndexError:
+                print(f"mid_ixs {mid_idx}, turn_idx {turn_idx}")
                 turn_idx = self.N_hor - 1 # if no turn found, use the last index
             if turn_idx < mid_idx: # prioritize turning around
                 current_refs = np.vstack(( np.tile(ref_states[[turn_idx], :], (turn_idx+1, 1)), ref_states[turn_idx+1:, :] )).reshape(-1).tolist()
