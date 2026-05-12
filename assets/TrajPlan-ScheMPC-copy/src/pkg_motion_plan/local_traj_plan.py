@@ -146,6 +146,8 @@ class LocalTrajPlanner:
         self._base_traj_docking_idx = 0
         self._sampling_method = method
 
+        # print(self._base_traj_target_node)
+
         self._idle = False
 
     def get_local_ref(self, current_time: float, current_pos: PathNode, idx_check_range:int=10, external_ref_speed:Optional[float]=None, ignore_speed_ref:bool=False):

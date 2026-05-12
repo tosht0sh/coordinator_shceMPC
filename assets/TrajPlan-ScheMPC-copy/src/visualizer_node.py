@@ -72,7 +72,7 @@ class VisualizerNode:
         self.config_dir = self.root_dir / "config"
         self.env_folder = env_folder
 
-        config_mpc_path = self.config_dir / os.getenv("MPC_CFG_NAME", "mpc_fast.yaml")
+        config_mpc_path = self.config_dir / os.getenv("MPC_CFG_NAME", "mpc_fast_sim.yaml")
         config_robot_path = self.config_dir / "robot_spec.yaml"
         self.config_mpc = MpcConfiguration.from_yaml(str(config_mpc_path))
         self.config_robot = CircularRobotSpecification.from_yaml(str(config_robot_path))

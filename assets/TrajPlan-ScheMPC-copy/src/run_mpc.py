@@ -21,6 +21,8 @@ from configs import CircularRobotSpecification
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
+from coordinator.coordinator import Coordinator
+
 def _env_bool(name, default=False):
     raw = os.getenv(name)
     if raw is None:
@@ -100,22 +102,12 @@ class UdpPoseReceiver:
 def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=False):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
-    CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
+    CFG_FNAME = "mpc_fast_sim.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
     MAP_ONLY = True
     AUTORUN = True # if false, press key (in the plot window) to continue
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = True
     TIMEOUT = 10000
-
-    # environment configs for UDP
-    #USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) # To run simulation with simulated data
-    # keep USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) if you want to use real data from
-    # the robot use USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", True)
-    # or export MPC_USE_UDP_STATE=1
-    # UDP_BIND_IP = os.getenv("MPC_UDP_BIND_IP", "0.0.0.0")
-    # UDP_PORT = int(os.getenv("MPC_UDP_PORT", "5005"))
-    # UDP_STATE_TIMEOUT = float(os.getenv("MPC_UDP_STATE_TIMEOUT", "0.5"))
-    # DEFAULT_VEHICLE = os.getenv("MPC_DEFAULT_VEHICLE", "").strip() or None
     
     robot_vehicle_map = _load_robot_vehicle_map() # TODO: what is this line doing exactly?
 
@@ -150,8 +142,12 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     # start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
 
     ## Load schedule of TwoRobots
-    schedule_path = os.path.join(data_dir, "schedule_TwoRobots.csv")
-    start_path = os.path.join(data_dir, "robot_start_TwoRobots.json")
+    # schedule_path = os.path.join(data_dir, "schedule_TwoRobots.csv")
+    # start_path = os.path.join(data_dir, "robot_start_TwoRobots.json")
+
+    ## Load schedule of CoordScene1
+    schedule_path = os.path.join(data_dir, "schedule_CoordScene1.csv")
+    start_path = os.path.join(data_dir, "robot_start_CoordScene1.json")
 
     ## Open schedule
     with open(start_path, "r") as f:
@@ -164,6 +160,12 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     robot_ids = gpc.robot_ids if robot_ids is None else robot_ids
     boundary_coords = gpc.current_map.boundary_coords
     static_obstacles = gpc.inflated_map.obstacle_coords_list
+
+    ### Set up for coodinator
+    coord = Coordinator.from_csv(schedule_path)
+    coord.load_graph_from_json(graph_path)
+
+    coord_shifted_targets = {}
 
     ### Set up robots
     robot_manager = RobotManager()
@@ -210,32 +212,17 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     missing_map_announced = set()
     idle_stop_sent = set()      # to stop idle state sending 0 speed multiple times
 
-    # if USE_UDP_STATE:
-    #     try:
-    #         udp_state_reader = UdpPoseReceiver(UDP_BIND_IP, UDP_PORT, stale_timeout=UDP_STATE_TIMEOUT)
-    #         print(f"[MPC] Listening for UDP poses on {UDP_BIND_IP}:{UDP_PORT}")
-    #         if robot_vehicle_map:
-    #             print(f"[MPC] Robot to vehicle mapping: {robot_vehicle_map}")
-    #     except OSError as e:
-    #         print(f"[MPC] Failed to start UDP pose receiver ({e}). Falling back to simulated state.")
-    #         udp_state_reader = None
-
-    
-    ## command action sending variables + socket settings
-    # v = 0.0
-    # w = 0.0
-    # tcp_port = 5006
-    # robot_ip = "192.168.1.197" # for CASELAB wifi
-    # # robot_ip = "10.42.0.129" # for laptop hotspot
-
-    # with socket.create_connection((robot_ip, tcp_port), timeout=5.0) as sock:
-    #     print(f"Streaming command pose at {robot_ip}:{tcp_port}.")
 
     for kt in range(TIMEOUT):
+        if kt == 2:                         # this is added as for some reason in the first step it always adds all robots as crossing node
+            coord_shifted_targets.clear()
+
         if udp_state_reader is not None:
             udp_state_reader.poll()
+
         robot_states = []
         incomplete = False
+
         for i, rid in enumerate(robot_ids):
             # if rid != 'A1':
             #     continue
@@ -245,25 +232,6 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             visualizer = robot_manager.get_visualizer(rid)
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
             using_live_state = False
-
-            # if udp_state_reader is not None:
-            #     mapped_vehicle = robot_vehicle_map.get(str(rid))
-            #     if mapped_vehicle is None:
-            #         if len(robot_ids) == 1:
-            #             mapped_vehicle = DEFAULT_VEHICLE
-            #         elif rid not in missing_map_announced:
-            #             print(f"[MPC] No vehicle mapping for robot '{rid}'. Using simulated state for this robot.")
-            #             print("[MPC] Set MPC_ROBOT_VEHICLE_MAP, example: {\"A1\": \"duckiebot\"}")
-            #             missing_map_announced.add(rid)
-
-            #     live_state = udp_state_reader.get_state(mapped_vehicle)
-            #     if live_state is not None:
-            #         robot.set_state(live_state)
-            #         using_live_state = True
-            #         if rid not in live_pose_announced:
-            #             source = mapped_vehicle if mapped_vehicle is not None else "latest UDP sender"
-            #             print(f"[MPC] Using live pose for robot '{rid}' from '{source}'.")
-            #             live_pose_announced.add(rid)
 
             if controller.idle:
                 duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
@@ -278,33 +246,96 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
                 ignore_speed_ref=ignore_speed_ref
             )
 
-            print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
-            controller.set_current_state(robot.state)
-            controller.set_ref_states(ref_states, ref_speed=ref_speed)
-            print(f"Robot_state {robot.state[0]}" )
             
-            if naive_tracker:
-                (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+
+            if kt > 2 and rid in coord_shifted_targets.keys():
+                # print(f'{rid}: {planner._base_traj_target_node}')
+
+                crossing_planner = LocalTrajPlanner(
+                    config_mpc.ts,
+                    config_mpc.N_hor,
+                    config_robot.lin_vel_max,
+                    verbose=VERBOSE,
+                )
+                crossing_planner.load_map(gpc.inflated_map.boundary_coords, gpc.inflated_map.obstacle_coords_list)
+
+                current_xy = (float(robot.state[0]), float(robot.state[1]))
+                shifted_xy = (float(coord_shifted_targets[rid][0]), float(coord_shifted_targets[rid][1]))
+                path_coords = [current_xy, shifted_xy]
+
+                base_path = planner._ref_path
+                base_idx = planner._current_target_node_idx
+                if base_path is not None and base_idx is not None and base_idx + 1 < len(base_path):
+                    resume_xy = tuple(base_path[base_idx + 1])
+                    if resume_xy != shifted_xy:
+                        path_coords.append(resume_xy)
+
+                crossing_planner.load_path(
+                    path_coords,
+                    None,
+                    nomial_speed=config_robot.lin_vel_max,
+                    method="linear",
+                )
+
+                print(crossing_planner._base_traj_target_node)
+
+                robot_manager.set_planner(rid, crossing_planner)
+
+
+
+            coord.update_horizon(rid, ref_states)
+            coord.update_target_nodes(rid, gpc.get_node_id(planner._current_target_node))
+            coord.update_curr_pose(rid, robot.state[:2])
+
+            clash = coord.validate()
+            # print(clash)
+
+            if rid in clash:
+                # print(clash[rid])
+                if clash[rid]['mode'] == 'stopped':
+                    print(f'Coordinator stopping {rid}')
+                    actions = [np.array([0.0, 0.0])]
+                    pred_states = np.array([robot.state.copy()] * config_mpc.N_hor)
+                    current_refs = ref_states
+                    debug_info = {"cost": 0.0, "step_runtime": 0.0, "monitored_cost": None}
+
+                if clash[rid]['mode'] == 'crossing':
+                    print(f'{rid} crossing node with shifterd target coords ')
+
+                    if rid not in coord_shifted_targets.keys():
+                        coord_shifted_targets.update({rid: clash[rid]['target_coord']})
+                        # planner._current_target_node = coord_shifted_targets[rid]
+
+                        print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{coord_shifted_targets[rid]}") # XXX
+                        controller.set_current_state(robot.state)
+                        controller.set_ref_states(ref_states, ref_speed=ref_speed)
+                        # print(f"Robot_state {robot.state[0]}" )
+                    
+                        if naive_tracker:
+                            (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+                        else:
+                            (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
+                                                                        full_dyn_obstacle_list=None,
+                                                                        other_robot_states=other_robot_states,
+                                                                        map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+
             else:
-                (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
-                                                            full_dyn_obstacle_list=None,
-                                                            other_robot_states=other_robot_states,
-                                                            map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+                print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
+                controller.set_current_state(robot.state)
+                controller.set_ref_states(ref_states, ref_speed=ref_speed)
+                
             
-            ############################################################################################################################
-            # DATA TO SEND TO BOTS
-            ############################################################################################################################
-            # What to insert from the robot
-            # x = float(robot.state[0]) # x pos
-            # y = float(robot.state[1]) # y pos
-            # theta = float(robot.state[2]) # theta
+                if naive_tracker:
+                    (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+                else:
+                    (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
+                                                                full_dyn_obstacle_list=None,
+                                                                other_robot_states=other_robot_states,
+                                                                map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+        
 
-            # v = float(actions[-1][0]) # linear vel
-            # w = float(actions[-1][1]) # anglar vel
-
-            # duck_payload = json.dumps({"v": round(v, 3), "w": round(w, 3)}) + "\n"
-            # duck_data = duck_payload.encode("utf-8")
-            # sock.sendall(duck_data)
+            print(coord_shifted_targets)
+            # print(f"Robot_state {robot.state[:2]}" )
 
             controller.report_cost(debug_info['cost'],
                                     debug_info['step_runtime'],
