@@ -8,6 +8,7 @@ import math
 
 import numpy as np
 import pandas as pd
+from itertools import combinations
 
 from basic_map.graph import NetGraph
 
@@ -28,6 +29,7 @@ class Coordinator:
         self._current_target_node_ids = {}     # dictionary that stores current targer node id of all robots
 
         self._remaining_nodes = {}
+        self._remaining_nodes_coords = {}
 
         self._curr_pose = {}
 
@@ -54,6 +56,14 @@ class Coordinator:
     def load_graph_from_json(self, graph_path):
         self._graph = NetGraph.from_json(graph_path)
 
+        self.add_target_coords()
+
+    def add_target_coords(self):
+        for rid in self._remaining_nodes:
+            self._remaining_nodes_coords[rid] = []
+            for node in self._remaining_nodes[rid]:
+                self._remaining_nodes_coords[rid].append(self._graph.get_node_coord(node))
+
 
     def update_horizon(self, robot_id, ref_states):
         """ Update horizion dict based on new robot states """
@@ -64,7 +74,7 @@ class Coordinator:
     def update_target_nodes(self, robot_id, target_node):
         
         if len(self._current_target_node_ids) == len(self._robot_ids):
-            # print(f"{robot_id}: {target_node}")    
+            print(f"[coord]{robot_id}: {self._current_target_node_ids[robot_id]}")    
             if self._current_target_node_ids[robot_id] != target_node:
                 
                 self._current_target_node_ids[robot_id] = target_node
@@ -75,6 +85,7 @@ class Coordinator:
 
 
     def update_curr_pose(self, robot_id, pose):
+        print(f'[coord] remaining_nodes: {self._remaining_nodes}')
 
         self._curr_pose[robot_id] = pose
 
@@ -107,11 +118,10 @@ class Coordinator:
         """ Validates current path of robots to avoid deadlock scenarios """
 
         # check if robots are heading towards the same node [COORDINATOR SCENE 1]
-        # TODO: this works for scene 1 now, but till the prioirity robot does not vacate fully, the systems keeps having issues. 
-        # need to solve this, maybe by forcing the prio robot to go a safe distance ahead of the node?
         target_node_list = set(self._current_target_node_ids.values())
 
         return_val = {}
+        collision_risk = False
 
         if len(target_node_list) != len(self._robot_ids):
             # print('Robots moving towards same node.')
@@ -126,12 +136,21 @@ class Coordinator:
                     # print(clash_horizons)
 
                 # TODO: this should not be hard coded.
-                dist_horizon_array = np.linalg.norm(clash_horizons['A1'][:, None, :] - clash_horizons['A2'][None, :, :], axis=2)
+                # dist_horizon_array = np.linalg.norm(clash_horizons['A1'][:, None, :] - clash_horizons['A2'][None, :, :], axis=2)
                     
-                collision_risk = np.any(dist_horizon_array < ((VEHICLE_WIDTH * 2) + VEHICLE_MARGIN))    # to check if distance between robots becomes close at any point in both horizons
-                # collision_risk = np.any(dist < 0.8)
+                # collision_risk = np.any(dist_horizon_array < ((VEHICLE_WIDTH * 2) + VEHICLE_MARGIN))    
+                # # collision_risk = np.any(dist < 0.8)
 
-                active_crossing = {}
+                for rid_1, rid_2 in combinations(rid_list, 2):
+                    dist_horizon_array = np.linalg.norm(
+                        clash_horizons[rid_1][:, None, :] - clash_horizons[rid_2][None, :, :],
+                        axis=2
+                    )
+
+                    # to check if distance between robots becomes close at any point in both horizons
+                    if np.any(dist_horizon_array < ((VEHICLE_WIDTH * 2) + VEHICLE_MARGIN)):
+                        collision_risk = True
+                        break                
 
                 if collision_risk:
                     # print(dist_horizon_array)
@@ -149,23 +168,21 @@ class Coordinator:
                         if curr_target_coord[0] == next_target_coord[0]:
 
                             if next_target_coord[1] - curr_target_coord[1] > 0:
-                                new_target_coord = (next_target_coord[0], (curr_target_coord[1] + 4 * VEHICLE_WIDTH))
+                                new_target_coord = (next_target_coord[0], (curr_target_coord[1] + 3 * VEHICLE_WIDTH))
                                 # print(f'new_target_coord: {new_target_coord}')
 
                             else:
-                                new_target_coord = (next_target_coord[0], (curr_target_coord[1] - 3.5 * VEHICLE_WIDTH))
+                                new_target_coord = (next_target_coord[0], (curr_target_coord[1] - 3 * VEHICLE_WIDTH))
                                 # print(f'new_target_coord: {new_target_coord}')
 
                         else:
                             if next_target_coord[0] - curr_target_coord[0] > 0:
-                                new_target_coord = ((curr_target_coord[0] + 3.5 * VEHICLE_WIDTH), new_target_coord[1])
+                                new_target_coord = ((curr_target_coord[0] + 3 * VEHICLE_WIDTH), next_target_coord[1])
                                 # print(f'new_target_coord: {new_target_coord}')
 
                             else:
-                                new_target_coord = ((curr_target_coord[0] - 3.5 * VEHICLE_WIDTH), new_target_coord[1])
+                                new_target_coord = ((curr_target_coord[0] - 3 * VEHICLE_WIDTH), next_target_coord[1])
                                 # print(f'new_target_coord: {new_target_coord}')
-
-                        # print({rid, new_target_coord})
 
                         # adding data into return dict.
                         return_val[rid] = {'mode': 'crossing', 'target_coord': new_target_coord}
@@ -174,9 +191,10 @@ class Coordinator:
                     for rid in stop_rids:
                         return_val[rid] = {'mode': 'stopped', 'target_coord': None}
 
-                    # return_val = self.coord_controlled_bots
-
-        return return_val
+        if return_val:
+            return return_val
+        else:
+            return None
 
     def dist_to_node(self, node, node_travellers):
         node_dist = {}
@@ -188,7 +206,7 @@ class Coordinator:
 
         min_dist = min(node_dist.values())
 
-        stop_rids = [rid for rid, dist in node_dist.items() if dist != min_dist]
-        crosser_rid = [rid for rid, dist in node_dist.items() if dist == min_dist]
+        crosser_rid = min(node_dist, key=lambda rid: (node_dist[rid], rid))
+        stop_rids = [rid for rid in node_travellers if rid != crosser_rid]
 
-        return crosser_rid, stop_rids
+        return [crosser_rid], stop_rids
