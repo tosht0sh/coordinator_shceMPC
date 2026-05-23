@@ -8,6 +8,9 @@
 !dependencies-py3.*
 !launchers
 assets/TrajPlan-ScheMPC-copy/.venv
+assets/TrajPlan-ScheMPC-copy/**/target
+assets/TrajPlan-ScheMPC-copy/**/__pycache__
+assets/TrajPlan-ScheMPC-copy/**/*.pyc
 
 # YOUR FILES LISTED BELOW THIS LINE (IMPORTANT: PREPEND !)
 # ----------------------------------------------------------------------------

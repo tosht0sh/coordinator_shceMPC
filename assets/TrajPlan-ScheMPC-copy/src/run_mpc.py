@@ -103,7 +103,7 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
     MAP_ONLY = True
     AUTORUN = True # if false, press key (in the plot window) to continue
-    MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
+    MONITOR_COST = True # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = True
     TIMEOUT = 10000
 

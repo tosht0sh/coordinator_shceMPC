@@ -150,6 +150,9 @@ class CasadiNMPC:
 
         ### Reference deviation costs J_R =||s_k- s(tilde)_k ||*Qs + ||u_k - u(tilde)_k||
         ### the term ||u_k - u_k-1 || is performed in build().
+        cts.cost_pos = self._q_terms["pos"] * (
+            (x_next[0] - ref_states[0, 0]) ** 2 + (x_next[1] - ref_states[1, 0]) ** 2
+        )
         cts.cost_rpd = mc.cost_refpath_deviation(x_next, ref_states[:2, :], weight=self._q_terms["rpd"]) # state in x,y
         cts.cost_rvd = self._q_terms["vel"] * (u_k[0] - self._r_v[k]) ** 2 # control action term
         theta_error = self._wrapped_angle_error(x_next[2], ref_states[2, 0])

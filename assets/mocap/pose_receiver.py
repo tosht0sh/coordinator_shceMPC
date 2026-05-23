@@ -15,7 +15,7 @@ sock.setblocking(False)
 # to poison the wrong robot's controller.
 forward_targets = {
     "duck1": ("192.168.1.11", 5005),
-    "duck2": ("192.168.1.18", 5005),
+    "duck2": ("192.168.1.12", 5005),
     # "duck3": ("192.168.1.13", 5005),
     # "duck4": ("192.168.1.14", 5005),
 }

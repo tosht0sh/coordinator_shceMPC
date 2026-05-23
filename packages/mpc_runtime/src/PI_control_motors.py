@@ -118,9 +118,9 @@ class PI:
     """
 
     def __init__(self):
-        self.kp = float(0.5) # 0.05
-        self.ki = float(0.25) #0.10
-        self.integral_limit = float(5.0)
+        self.kp = float(0.10) # 0.05
+        self.ki = float(1.5) #0.10
+        self.integral_limit = float(2.0)
         self.estimator = TickToVelocity()
         self.wheel_radius = self.estimator.wheel_radius
         self.axis_length = self.estimator.axis_length

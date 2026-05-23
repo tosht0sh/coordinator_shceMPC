@@ -19,19 +19,19 @@ Ndynobs: 15  # Maximal number of dynamic obstacles
 ndynobs: 6   # Number of variables per dynamic obstacle
 # Penalty weights
 lin_vel_penalty: 0      # Cost for linear velocity control action (should be 0)
-lin_acc_penalty: 1.0   # Cost for linear acceleration 
+lin_acc_penalty: 0.0   # Cost for linear acceleration 
 ang_vel_penalty: 0.0      # Cost angular velocity control action
 ang_acc_penalty: 0.0   # Cost angular acceleration
-qrpd: 1200.0 #1200.0 #100.0 #1.0             # Cost for reference path deviation
-qpos: 300.0               # Cost for position deviation each time step to the reference
+qrpd: 0.0 #10.0 #1200.0 #100.0 #1.0             # Cost for reference path deviation
+qpos: 8.0 #50.0               # Cost for position deviation each time step to the reference
 qvel: 1.0 # 1.0 #3.0              # Cost for speed    deviation each time step to the reference
-qtheta: 250.0 #100.0 #200.0 #50.0             # Cost for heading  deviation each time step to the reference
+qtheta: 1.0 #75.0 #100.0 #200.0 #50.0             # Cost for heading  deviation each time step to the reference
 # Obstacle avoidance weights
 qstcobs: 10.0 #10.0         # Cost for static obstacle avoidance
 qdynobs: 10.0 #10.0          # Cost for dynamic obstacle avoidance
 # Terminal weights
-qpN: 50.0                # Terminal cost; error relative to final reference position         
-qthetaN: 50.0            # Terminal cost; error relative to final reference heading   
+qpN: 0.0                # Terminal cost; error relative to final reference position         
+qthetaN: 0.0            # Terminal cost; error relative to final reference heading   
 # Building options in the optimizer
 solver_type: 'Casadi'
 max_solver_time: 100_000        # micros (0.1 sec)

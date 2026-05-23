@@ -120,7 +120,7 @@ class BotMpcNode(DTROS):
 
         
 
-        self.pi_controller = PI()
+        #self.pi_controller = PI()
 
         self.pose_sub = rospy.Subscriber(self.pose_topic, Float64MultiArray, self._on_pose, queue_size=10)
         self.cmd_pub = rospy.Publisher(self.cmd_topic, Twist2DStamped, queue_size=1)
@@ -358,15 +358,15 @@ class BotMpcNode(DTROS):
             dtype=float,
         ))
 
-        if self.pi_controller.is_ready():
-            corrected_v, corrected_omega = self.pi_controller.pi_controller(
-                float(published_action[0]),
-                float(published_action[1]),
-                self.config_mpc.ts,
-            )
-            published_action = self._clip_action(np.asarray([corrected_v, corrected_omega], dtype=float))
-        else:
-            rospy.loginfo_throttle(2.0, "Wheel PI waiting for valid encoder updates; publishing raw MPC command.")
+        # if self.pi_controller.is_ready():
+        #     corrected_v, corrected_omega = self.pi_controller.pi_controller(
+        #         float(published_action[0]),
+        #         float(published_action[1]),
+        #         self.config_mpc.ts,
+        #     )
+        #     published_action = self._clip_action(np.asarray([corrected_v, corrected_omega], dtype=float))
+        # else:
+        #     rospy.loginfo_throttle(2.0, "Wheel PI waiting for valid encoder updates; publishing raw MPC command.")
 
         msg = Twist2DStamped(v=float(published_action[0]), omega=float(published_action[1]))
         self.cmd_pub.publish(msg)

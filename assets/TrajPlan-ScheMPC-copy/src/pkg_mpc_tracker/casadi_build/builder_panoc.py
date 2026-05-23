@@ -146,6 +146,9 @@ class PanocBuilder:
         theta_err = mh.angle_error(state[2], ref_states[2, 0])
 
         ### Reference deviation costs
+        cts.cost_pos = pts['pos'] * (
+            (state[0] - ref_states[0, 0])**2 + (state[1] - ref_states[1, 0])**2
+        )
         cts.cost_rpd = mc.cost_refpath_deviation(state, ref_states[:2, :], weight=pts['rpd'])
         cts.cost_rvd = pts['vel'] * (action[0]-ref_speed)**2
         cts.cost_rtd = pts['theta'] * theta_err**2
@@ -315,6 +318,5 @@ class PanocBuilder:
             builder.build()
 
         print(f'[{self.__class__.__name__}] MPC module built with {self._num_params} parameters.')
-
 
 
