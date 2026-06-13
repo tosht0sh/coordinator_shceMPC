@@ -41,8 +41,8 @@ The folder currently packages currently made are:
 3. Kim Laptop: 192.168.1.10
 4. Duck1: 192.168.1.11
 4. Duck2: 192.168.1.12
-4. Duck3: 192.168.1.13
-4. Duck4: 192.168.1.14
+4. Duck4: 192.168.1.13
+4. Duck6: 192.168.1.14
 
 
 ## Running ROSCORE on laptop

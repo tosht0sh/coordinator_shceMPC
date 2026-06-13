@@ -137,8 +137,11 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     # start_path = os.path.join(data_dir, "robot_start.json")
 
     ## Load schedule of SingleRobot
-    schedule_path = os.path.join(data_dir, "schedule_SingleRobot.csv")
-    start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
+    # schedule_path = os.path.join(data_dir, "schedule_SingleRobot.csv")
+    # start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
+
+    schedule_path = os.path.join(data_dir, "schedule_MultiRobots.csv")
+    start_path = os.path.join(data_dir, "robot_start_MultiRobots.json")
 
     ## Load schedule of TwoRobots
     # schedule_path = os.path.join(data_dir, "schedule_TwoRobots.csv")

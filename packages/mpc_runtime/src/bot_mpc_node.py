@@ -100,9 +100,21 @@ class BotMpcNode(DTROS):
         self.report_cost = _env_bool("MPC_REPORT_COST", False)
         self.omega_scale = float(os.getenv("MPC_OMEGA_SCALE", "1.0"))
         
-
-        cfg_name = os.getenv("MPC_CFG_NAME", "mpc_fast.yaml")
+        cfg_name = os.getenv("MPC_CFG_NAME")
+        #cfg_name = os.getenv("MPC_CFG_NAME", "mpc_fast.yaml")
         robot_cfg_name = os.getenv("MPC_ROBOT_CFG_NAME", "robot_spec.yaml")
+        
+
+        if cfg_name is None:
+            if self.vehicle_name == "duck1":
+                cfg_name = "mpc_duck1.yaml"
+            elif self.vehicle_name == "duck2":
+                cfg_name = "mpc_duck2.yaml"
+            elif self.vehicle_name == "duck4":
+                cfg_name = "mpc_duck4.yaml"
+            elif self.vehicle_name == "duck6":
+                cfg_name = "mpc_duck6.yaml"
+
 
         from configs import CircularRobotSpecification, MpcConfiguration
 

@@ -470,13 +470,13 @@ class TrajectoryTracker:
 
         ### Get reference velocities ### 
         ### Remove the if statement statement entirly to remove slow down before goal
-        dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
-        if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
-            speed_ref = dist_to_goal / self.N_hor / self.ts * 2
-            speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
-            speed_ref_list = [speed_ref]*self.N_hor
-        else:
-            speed_ref_list = [self.base_speed]*self.N_hor
+        # dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
+        # if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
+        #     speed_ref = dist_to_goal / self.N_hor / self.ts * 2
+        #     speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
+        #     speed_ref_list = [speed_ref]*self.N_hor
+        # else:
+        speed_ref_list = [self.base_speed]*self.N_hor
 
         last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
 
@@ -493,14 +493,14 @@ class TrajectoryTracker:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
         
-        if theta_diff > 100: # and theta_diff_last > 90:
-            self.set_work_mode(mode='aligning')
-            if not ignore_speed_ref:
-                # Large heading errors are better handled as an in-place alignment
-                # problem; asking for forward travel here tends to produce arcs/spins.
-                speed_ref_list = [0.0] * self.N_hor
-        else:
-            self.set_work_mode(mode='work', use_predefined_speed=False)
+        # if theta_diff > 100: # and theta_diff_last > 90:
+        #     self.set_work_mode(mode='aligning')
+        #     if not ignore_speed_ref:
+        #         # Large heading errors are better handled as an in-place alignment
+        #         # problem; asking for forward travel here tends to produce arcs/spins.
+        #         speed_ref_list = [0.0] * self.N_hor
+        # else:
+        #     self.set_work_mode(mode='work', use_predefined_speed=False)
 
         ### Check if turning around ###
         mid_idx = min(3, self.N_hor - 1)

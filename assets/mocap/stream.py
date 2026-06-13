@@ -124,7 +124,7 @@ async def main():
     pos_scale = 0.001
     send_hz = 30.0
     target = (TARGET_IP, 5005)
-    vehicles = ("duck1", "duck2", "duck3", "duck4")
+    vehicles = ("duck1", "duck2", "duck4", "duck6")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 

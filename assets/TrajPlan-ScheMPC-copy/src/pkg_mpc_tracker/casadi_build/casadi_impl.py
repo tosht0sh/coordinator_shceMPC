@@ -48,8 +48,8 @@ class CasadiNMPC:
     - Obstacle terms are included as soft costs; hard constraints can be added as TODO.
     """
 
-    _large_weight = 1000.0 # 1000
-    _small_weight = 10.0 # 10
+    _large_weight = 1.0 # 1000
+    _small_weight = 0.5 # 10
     _critical_step = 100
     _penalty_weight = 10.0 # Modelling parameter, can be changed!
 
@@ -161,8 +161,8 @@ class CasadiNMPC:
 
         ### Fleet collision avoidance: J_f =  max(0,Q_f * (d_fleet - distance))**2
         ### used from mpc_cost, cost_fleet_collision.
-        safe_distance = 0.5 #2 * (self._spec.vehicle_width + self._spec.vehicle_margin)
-        critical_distance = 0.30 #2 * self._spec.vehicle_width + self._spec.vehicle_margin
+        safe_distance = 0.1 #2 * (self._spec.vehicle_width + self._spec.vehicle_margin)
+        critical_distance = 0.05 #2 * self._spec.vehicle_width + self._spec.vehicle_margin
         if k < self._critical_step:
             cts.cost_fleet = mc.cost_fleet_collision(
                 x_next[:2],
@@ -179,9 +179,9 @@ class CasadiNMPC:
             weight=self._small_weight,
         )
         ### J_O dynamic/static obstacle costs, similar to PANOC implementation.
-        cts.cost_dynobs = self._dynamic_obstacle_current_cost(k, x_next)
-        cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
-        cts.cost_dynobs_pred = self._dynamic_obstacle_cost(k, x_next, self._q_dyn[k])
+        #cts.cost_dynobs = self._dynamic_obstacle_current_cost(k, x_next)
+        #cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
+        #cts.cost_dynobs_pred = self._dynamic_obstacle_cost(k, x_next, self._q_dyn[k])
         # penalty_constraints_stcobs = self._penalty_weight * self._static_obstacle_intrusion(x_next)
         # penalty_constraints_dynobs = self._penalty_weight * self._dynamic_obstacle_intrusion(k, x_next)
         return cts.sum() # + penalty_constraints_stcobs + penalty_constraints_dynobs
@@ -372,10 +372,10 @@ class CasadiNMPC:
             #total_cost +=  ca.sum1(e_dynamic_k)#1e2 * ca.sum1(e_dynamic_k) + 1e4 * ca.sum1(e_dynamic_k**2)
             # total_cost += rho_stc * ca.sum1(e_static_k**2)
             # total_cost += rho_dyn * ca.sum1(e_dynamic_k**2)
-            v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
-            v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
-            v = ca.vertcat(v_stc, v_dyn)
-            total_cost += self._rho_pen * ca.dot(v,v)
+            #v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
+            #v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
+            #v = ca.vertcat(v_stc, v_dyn)
+            #total_cost += self._rho_pen * ca.dot(v,v)
 
             prev_v = u_k[0]
             prev_w = u_k[1]
@@ -432,58 +432,6 @@ class CasadiNMPC:
         return x_shift + u_shift
 
 
-    # @staticmethod
-    # def shift_warm_start(
-    #     w_opt: list[float],
-    #     ns: int,
-    #     nu: int,
-    #     N: int,
-    #     n_stcobs: int = 0,
-    #     n_dynobs: int = 0,
-    # ) -> list[float]:
-    #     """Shift warm start for `w = [X, U, eps_static, eps_dynamic]`.
-
-    #     If no slack variables are used, keep `n_stcobs=n_dynobs=0` and the function
-    #     reduces to the old `[X, U]` behavior.
-    #     """
-    #     x_size = ns * (N + 1)
-    #     u_size = nu * N
-    #     eps_stc_size = N * n_stcobs
-    #     eps_dyn_size = N * n_dynobs
-    #     expected_size = x_size + u_size + eps_stc_size + eps_dyn_size
-    #     if len(w_opt) != expected_size:
-    #         raise ValueError(
-    #             "Warm-start vector size mismatch: "
-    #             f"got {len(w_opt)}, expected {expected_size} "
-    #             f"(ns={ns}, nu={nu}, N={N}, n_stcobs={n_stcobs}, n_dynobs={n_dynobs})."
-    #         )
-
-    #     x = w_opt[:x_size]
-    #     u_start = x_size
-    #     u_end = u_start + u_size
-    #     u = w_opt[u_start:u_end]
-
-    #     eps_stc_start = u_end
-    #     eps_stc_end = eps_stc_start + eps_stc_size
-    #     eps_stc = w_opt[eps_stc_start:eps_stc_end]
-
-    #     eps_dyn = w_opt[eps_stc_end:eps_stc_end + eps_dyn_size]
-
-    #     x_shift = x[ns:] + x[-ns:]
-    #     u_shift = u[nu:] + u[-nu:]
-
-    #     # Shift slacks one stage and repeat the last stage values.
-    #     if n_stcobs > 0:
-    #         eps_stc_shift = eps_stc[n_stcobs:] + eps_stc[-n_stcobs:]
-    #     else:
-    #         eps_stc_shift = []
-    #     if n_dynobs > 0:
-    #         eps_dyn_shift = eps_dyn[n_dynobs:] + eps_dyn[-n_dynobs:]
-    #     else:
-    #         eps_dyn_shift = []
-
-    #     return x_shift + u_shift + eps_stc_shift + eps_dyn_shift
-
     def pack_parameters(
         self,
         u_m1: Sequence[float],
@@ -517,5 +465,3 @@ class CasadiNMPC:
         extend(q_dyn)
         extend(([rho_pen]))
         return p
-
-    # TODO: once this skeleton is validated, connect it to `trajectory_tracker.run_solver` for solver_type == "Casadi".

@@ -53,7 +53,7 @@ NEIGHBOR_PORT = int(os.getenv("MPC_NEIGHBOR_PORT", "5009"))
 DEFAULT_BOT_PORT = int(os.getenv("MPC_DEFAULT_BOT_PORT", "5007"))
 MONITOR_AUTORUN = os.getenv("MPC_MONITOR_AUTORUN", "1").strip().lower() in {"1", "true", "yes", "on"}
 MAP_ONLY = os.getenv("MPC_MONITOR_MAP_ONLY", "1").strip().lower() in {"1", "true", "yes", "on"}
-SHADOW_SIM = os.getenv("MPC_SHADOW_SIM", "1").strip().lower() in {"1", "true", "yes", "on"}
+SHADOW_SIM = False #os.getenv("MPC_SHADOW_SIM", "1").strip().lower() in {"1", "true", "yes", "on"}
 OUTPUT_CSV = os.getenv("MPC_MONITOR_ACTUAL_CSV", "Actual_monitor.csv")
 IDLE_TIMEOUT = float(os.getenv("MPC_MONITOR_IDLE_TIMEOUT", "0.1"))
 
@@ -89,6 +89,7 @@ def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path,
         "Original": ("schedule.csv", "robot_start.json"),
         "SingleRobot": ("schedule_SingleRobot.csv", "robot_start_SingleRobot.json"),
         "TwoRobots": ("schedule_TwoRobots.csv", "robot_start_TwoRobots.json"),
+        "MultiRobot": ("schedule_MultiRobots.csv", "robot_start_MultiRobots.json"),
     }
     schedule_name, start_name = mapping.get(variant, mapping["SingleRobot"])
     return data_dir / schedule_name, data_dir / start_name

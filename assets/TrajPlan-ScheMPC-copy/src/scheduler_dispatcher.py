@@ -69,6 +69,7 @@ def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path,
         "Original": ("schedule.csv", "robot_start.json"),
         "SingleRobot": ("schedule_SingleRobot.csv", "robot_start_SingleRobot.json"),
         "TwoRobots": ("schedule_TwoRobots.csv", "robot_start_TwoRobots.json"),
+        "MultiRobot": ("schedule_MultiRobots.csv", "robot_start_MultiRobots.json"),
     }
     schedule_name, start_name = mapping.get(variant, mapping["SingleRobot"])
     return data_dir / schedule_name, data_dir / start_name
@@ -137,9 +138,9 @@ class SchedulerDispatcher:
         map_packet = self.build_map_packet()
         for robot_id in self.robot_ids:
             rid = str(robot_id)
-            host = "192.168.1.11" # Robots ip
-            port = 5007
-            # host, port = self._endpoint_for(rid)
+            # host = "192.168.1.14" # Robots ip
+            # port = 5007
+            host, port = self._endpoint_for(rid)
 
             schedule_packet = self.build_schedule_packet(robot_id)
             with socket.create_connection((host, port), timeout=DISPATCH_TIMEOUT) as sock:

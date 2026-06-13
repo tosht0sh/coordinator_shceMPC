@@ -56,7 +56,7 @@ class WheelIdCommandPlayer:
             "WHEEL_ID_PLAYER_TOPIC",
             f"/{self.vehicle_name}/car_cmd_switch_node/cmd",
         )
-        self.publish_hz = float(os.getenv("WHEEL_ID_PLAYER_HZ", "5.0"))
+        self.publish_hz = float(os.getenv("WHEEL_ID_PLAYER_HZ", "25.0"))
         self.repeat = _env_bool("WHEEL_ID_PLAYER_REPEAT", False)
 
         # Default sequence approximates the rectangle-like schedule used for the
@@ -69,6 +69,37 @@ class WheelIdCommandPlayer:
         quarter_turn_sec = 0.7
         half_turn_sec = 1.40
         settle_sec = 0.60
+
+        # Use this for traning
+        # default_sequence = (
+        #     "1.0,0.00,0.00;"
+        #     "3.0,0.12,0.00;"
+        #     "0.8,0.00,0.00;"
+        #     "4.5,0.20,0.00;"
+        #     "0.8,0.00,0.00;"
+        #     "2.5,0.28,0.00;"
+        #     "0.8,0.00,0.00;"
+        #     "0.7,0.00,2.50;"
+        #     "0.8,0.00,0.00;"
+        #     "0.9,0.00,3.50;"
+        #     "0.8,0.00,0.00;"
+        #     "0.7,0.00,-2.50;"
+        #     "0.8,0.00,0.00;"
+        #     "0.9,0.00,-3.50;"
+        #     "0.8,0.00,0.00;"
+        #     "2.5,0.14,1.50;"
+        #     "0.8,0.00,0.00;"
+        #     "2.5,0.14,-1.50;"
+        #     "0.8,0.00,0.00;"
+        #     "3.5,0.22,0.00;"
+        #     "0.8,0.00,0.00;"
+        #     "2.0,0.18,2.00;"
+        #     "0.8,0.00,0.00;"
+        #     "2.0,0.18,-2.00;"
+        #     "1.0,0.00,0.00"
+        # )
+
+        # Use this for validation
         default_sequence = (
             "1.0,0.00,0.00;"
             f"6.0,{straight_speed:.2f},0.00;"

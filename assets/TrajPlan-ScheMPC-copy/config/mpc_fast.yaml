@@ -12,7 +12,7 @@ action_steps: 1  # How many steps should be taken from each mpc-solution. Range 
 nu: 2     # Number of control inputs (speed and angular speed)
 ns: 3     # Number of states for the robot (x,y,theta,e) [e is the channel width/permitted error, not included yet]
 nq: 10    # Number of optimization penalties
-Nother:  1  # Number of other robots modelled by the MPC (set to n_bots-1 for your scenario)
+Nother:  2  # Number of other robots modelled by the MPC (set to n_bots-1 for your scenario)
 Nstcobs: 10  # Maximal number of static obstacles
 nstcobs: 12  # Number of variables per obstacles, (4 edges * 3 per edge)
 Ndynobs: 15  # Maximal number of dynamic obstacles

@@ -29,7 +29,7 @@ class TickToVelocity:
             0.1,
         )
         # Small time constant keeps the estimate smooth without adding too much lag.
-        self.tau = rospy.get_param("~lpf_tau", 0.2)
+        self.tau = rospy.get_param("~lpf_tau", 0.02)
 
         self.prev = {
             "L": {"t": None, "ticks": None},

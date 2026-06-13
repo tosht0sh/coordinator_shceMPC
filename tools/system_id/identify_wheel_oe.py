@@ -1,38 +1,52 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Identify a second-order ARX wheel-speed model from logged Duckiebot data.
+"""Identify an output-error wheel-speed model from logged Duckiebot data.
 
-For each wheel, fit the discrete-time model:
+For each wheel, fit the discrete-time OE model:
 
-    y[k] = a1 * y[k-1] + a2 * y[k-2] + b1 * u[k-1] + b2 * u[k-2]
+    y[k] = -f1*y[k-1] - ... - fnf*y[k-nf]
+           + b1*u[k-nk] + ... + bnb*u[k-nk-nb+1]
 
-This is a practical next step when the first-order model is too simple for the
-measured black-box drive-stack dynamics.
+This treats the measured wheel speed as the output of a deterministic plant
+driven by the commanded wheel speed. Unlike ARX, the prediction error is
+computed from a free-run simulation, so the identified denominator is less
+biased by output noise.
 """
 
 import argparse
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.optimize import least_squares
 
 
 WHEEL_RADIUS = 0.0318
 AXLE_LENGTH = 0.10
 
-NA = 2
 NB = 2
+NF = 2
 NK = 0
 
-REQUIRED_COLUMNS = ["t", "v_cmd", "omega_cmd", "wL_meas", "wR_meas"]
+REQUIRED_BASE_COLUMNS = ["t", "v_cmd", "omega_cmd"]
 
 
-def load_data(csv_path: str) -> pd.DataFrame:
-    """Load, clean, and normalize a wheel-ID CSV file."""
+def measurement_columns(meas_signal: str) -> tuple[str, str]:
+    if meas_signal == "filtered":
+        return "wL_meas", "wR_meas"
+    if meas_signal == "raw":
+        return "wL_raw", "wR_raw"
+    raise ValueError(f"Unsupported measurement signal: {meas_signal}")
 
+
+def load_data(csv_path: str, meas_cols: tuple[str, str]) -> pd.DataFrame:
+    """Load, clean, and lightly normalize a wheel-ID CSV file."""
+
+    required_cols = REQUIRED_BASE_COLUMNS + list(meas_cols)
     df = pd.read_csv(csv_path)
 
-    missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
+    missing = [col for col in required_cols if col not in df.columns]
     if missing:
         raise ValueError(f"{csv_path} is missing required columns: {missing}")
 
@@ -41,7 +55,7 @@ def load_data(csv_path: str) -> pd.DataFrame:
         df = df[df["enc_ready"].astype(bool)]
 
     df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.dropna(subset=REQUIRED_COLUMNS)
+    df = df.dropna(subset=required_cols)
     df = df.sort_values("t")
     df = df.drop_duplicates(subset="t")
     df = df.reset_index(drop=True)
@@ -87,12 +101,13 @@ def zero_order_hold_resample(source_t: np.ndarray, source_y: np.ndarray, target_
     return source_y[indices]
 
 
-def resample_to_uniform_grid(df: pd.DataFrame, Ts: float) -> pd.DataFrame:
-    """Resample commands and measured wheel speeds onto a uniform time grid."""
+def resample_to_uniform_grid(df: pd.DataFrame, Ts: float, meas_cols: tuple[str, str]) -> pd.DataFrame:
+    """Resample commands and selected wheel-speed signals onto a uniform grid."""
 
     if Ts <= 0.0:
         raise ValueError("Resampling time step Ts must be positive.")
 
+    left_meas_col, right_meas_col = meas_cols
     source_t = df["t"].to_numpy(dtype=float)
     t_end = float(source_t[-1])
     target_t = np.arange(0.0, t_end + 1e-12, Ts, dtype=float)
@@ -101,16 +116,16 @@ def resample_to_uniform_grid(df: pd.DataFrame, Ts: float) -> pd.DataFrame:
 
     v_cmd = zero_order_hold_resample(source_t, df["v_cmd"].to_numpy(dtype=float), target_t)
     omega_cmd = zero_order_hold_resample(source_t, df["omega_cmd"].to_numpy(dtype=float), target_t)
-    w_left_meas = np.interp(target_t, source_t, df["wL_meas"].to_numpy(dtype=float))
-    w_right_meas = np.interp(target_t, source_t, df["wR_meas"].to_numpy(dtype=float))
+    w_left = np.interp(target_t, source_t, df[left_meas_col].to_numpy(dtype=float))
+    w_right = np.interp(target_t, source_t, df[right_meas_col].to_numpy(dtype=float))
 
     return pd.DataFrame(
         {
             "t": target_t,
             "v_cmd": v_cmd,
             "omega_cmd": omega_cmd,
-            "wL_meas": w_left_meas,
-            "wR_meas": w_right_meas,
+            left_meas_col: w_left,
+            right_meas_col: w_right,
         }
     )
 
@@ -120,79 +135,14 @@ def prepare_dataset(
     wheel_radius: float,
     axle_length: float,
     Ts: float,
+    meas_cols: tuple[str, str],
 ) -> tuple[pd.DataFrame, float, float]:
     """Resample a dataset and compute wheel commands on the uniform grid."""
 
-    df = resample_to_uniform_grid(df_raw, Ts)
+    df = resample_to_uniform_grid(df_raw, Ts, meas_cols)
     df = compute_wheel_commands(df, wheel_radius, axle_length)
     Ts_est, rel_jitter = estimate_sample_time(df["t"].to_numpy())
     return df, Ts_est, rel_jitter
-
-
-def fit_arx_model(
-    u: np.ndarray,
-    y: np.ndarray,
-    na: int = NA,
-    nb: int = NB,
-    nk: int = NK,
-) -> tuple[np.ndarray, np.ndarray, int]:
-    """Fit a standard ARX model.
-
-    Model form:
-        y[k] = a1*y[k-1] + ... + ana*y[k-na] + b1*u[k-nk] + ... + bnb*u[k-nk-nb+1]
-    """
-
-    u = np.asarray(u, dtype=float)
-    y = np.asarray(y, dtype=float)
-
-    if len(u) != len(y):
-        raise ValueError("u and y must have the same length.")
-
-    start_idx = max(na, nk + nb - 1)
-    if len(y) <= start_idx:
-        raise ValueError("Need more samples to fit the requested ARX model.")
-
-    regressors: list[list[float]] = []
-    targets: list[float] = []
-    for k in range(start_idx, len(y)):
-        row = [float(y[k - i]) for i in range(1, na + 1)]
-        row.extend(float(u[k - nk - j]) for j in range(nb))
-        regressors.append(row)
-        targets.append(float(y[k]))
-
-    phi = np.asarray(regressors, dtype=float)
-    target = np.asarray(targets, dtype=float)
-    theta, *_ = np.linalg.lstsq(phi, target, rcond=None)
-
-    a = theta[:na]
-    b = theta[na:]
-    return a, b, start_idx
-
-
-def simulate_arx_model(
-    u: np.ndarray,
-    y_init: np.ndarray,
-    a: np.ndarray,
-    b: np.ndarray,
-    start_idx: int,
-    nk: int = NK,
-) -> np.ndarray:
-    """Free-run the ARX model from measured initial conditions."""
-
-    u = np.asarray(u, dtype=float)
-    y_init = np.asarray(y_init, dtype=float)
-    a = np.asarray(a, dtype=float)
-    b = np.asarray(b, dtype=float)
-
-    y_sim = np.zeros_like(u, dtype=float)
-    y_sim[:start_idx] = y_init[:start_idx]
-
-    for k in range(start_idx, len(u)):
-        y_part = sum(a[i] * y_sim[k - 1 - i] for i in range(len(a)))
-        u_part = sum(b[j] * u[k - nk - j] for j in range(len(b)))
-        y_sim[k] = y_part + u_part
-
-    return y_sim
 
 
 def fit_metric(y_true: np.ndarray, y_sim: np.ndarray) -> dict[str, float]:
@@ -208,16 +158,138 @@ def fit_metric(y_true: np.ndarray, y_sim: np.ndarray) -> dict[str, float]:
     return {"rmse": rmse, "fit_percent": fit_percent}
 
 
-def arx_properties(a: np.ndarray, b: np.ndarray) -> dict[str, object]:
-    """Return a few helpful ARX interpretation quantities."""
+def start_index(nb: int, nf: int, nk: int) -> int:
+    """Return the first sample index with enough history for the OE model."""
 
-    a1, a2 = float(a[0]), float(a[1])
-    b1, b2 = float(b[0]), float(b[1])
-    poles = np.roots([1.0, -a1, -a2])
-    stable = bool(np.all(np.abs(poles) < 1.0))
+    return max(nf, nk + nb - 1, 1)
 
-    denom = 1.0 - a1 - a2
-    dc_gain = None if abs(denom) < 1e-9 else float((b1 + b2) / denom)
+
+def fit_arx_initial_guess(
+    u: np.ndarray,
+    y: np.ndarray,
+    nb: int,
+    nf: int,
+    nk: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build an ARX-style least-squares initial guess for the OE optimizer."""
+
+    u = np.asarray(u, dtype=float)
+    y = np.asarray(y, dtype=float)
+    idx0 = start_index(nb, nf, nk)
+
+    regressors: list[list[float]] = []
+    targets: list[float] = []
+    for k in range(idx0, len(y)):
+        row = [-float(y[k - 1 - i]) for i in range(nf)]
+        row.extend(float(u[k - nk - j]) for j in range(nb))
+        regressors.append(row)
+        targets.append(float(y[k]))
+
+    phi = np.asarray(regressors, dtype=float)
+    target = np.asarray(targets, dtype=float)
+    theta, *_ = np.linalg.lstsq(phi, target, rcond=None)
+    f = theta[:nf]
+    b = theta[nf:]
+    return np.asarray(f, dtype=float), np.asarray(b, dtype=float)
+
+
+def simulate_oe_model(
+    u: np.ndarray,
+    y_init: np.ndarray,
+    f: np.ndarray,
+    b: np.ndarray,
+    nk: int,
+) -> np.ndarray:
+    """Free-run the OE model from measured initial conditions."""
+
+    u = np.asarray(u, dtype=float)
+    y_init = np.asarray(y_init, dtype=float)
+    f = np.asarray(f, dtype=float)
+    b = np.asarray(b, dtype=float)
+
+    idx0 = start_index(len(b), len(f), nk)
+    y_sim = np.zeros_like(u, dtype=float)
+    y_sim[:idx0] = y_init[:idx0]
+
+    for k in range(idx0, len(u)):
+        y_part = -sum(f[i] * y_sim[k - 1 - i] for i in range(len(f)))
+        u_part = sum(b[j] * u[k - nk - j] for j in range(len(b)))
+        y_sim[k] = y_part + u_part
+
+    return y_sim
+
+
+def oe_residuals(theta: np.ndarray, u: np.ndarray, y: np.ndarray, nb: int, nf: int, nk: int) -> np.ndarray:
+    """Return free-run simulation errors for the requested OE structure."""
+
+    f = theta[:nf]
+    b = theta[nf:]
+    idx0 = start_index(nb, nf, nk)
+    y_sim = simulate_oe_model(u, y, f, b, nk)
+    return y[idx0:] - y_sim[idx0:]
+
+
+def fit_oe_model(
+    u: np.ndarray,
+    y: np.ndarray,
+    nb: int = NB,
+    nf: int = NF,
+    nk: int = NK,
+    max_nfev: int = 400,
+) -> tuple[np.ndarray, np.ndarray, int, object]:
+    """Fit an OE model by minimizing free-run simulation error."""
+
+    u = np.asarray(u, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    if len(u) != len(y):
+        raise ValueError("u and y must have the same length.")
+    if nb < 1:
+        raise ValueError("nb must be at least 1.")
+    if nf < 0:
+        raise ValueError("nf must be non-negative.")
+    if nk < 0:
+        raise ValueError("nk must be non-negative.")
+
+    idx0 = start_index(nb, nf, nk)
+    if len(y) <= idx0:
+        raise ValueError("Need more samples to fit the requested OE model.")
+
+    f0_arx, b0_arx = fit_arx_initial_guess(u, y, nb, nf, nk)
+    theta0_arx = np.concatenate([f0_arx, b0_arx])
+    theta0_zero = np.zeros(nf + nb, dtype=float)
+    if len(b0_arx) > 0:
+        theta0_zero[nf] = b0_arx[0]
+
+    best_result = None
+    for theta0 in (theta0_arx, theta0_zero):
+        result = least_squares(
+            oe_residuals,
+            theta0,
+            args=(u, y, nb, nf, nk),
+            method="trf",
+            max_nfev=max_nfev,
+            x_scale="jac",
+        )
+        if best_result is None or result.cost < best_result.cost:
+            best_result = result
+
+    assert best_result is not None
+    f = best_result.x[:nf]
+    b = best_result.x[nf:]
+    return np.asarray(f, dtype=float), np.asarray(b, dtype=float), idx0, best_result
+
+
+def oe_properties(f: np.ndarray, b: np.ndarray) -> dict[str, object]:
+    """Return a few helpful OE interpretation quantities."""
+
+    f = np.asarray(f, dtype=float)
+    b = np.asarray(b, dtype=float)
+    poles = np.roots(np.concatenate([[1.0], f])) if len(f) > 0 else np.asarray([])
+    stable = bool(np.all(np.abs(poles) < 1.0)) if len(poles) > 0 else True
+
+    denom = 1.0 + float(np.sum(f))
+    dc_gain = None if abs(denom) < 1e-9 else float(np.sum(b) / denom)
     return {
         "poles": poles,
         "stable": stable,
@@ -230,26 +302,30 @@ def evaluate_wheel(
     val_df: pd.DataFrame,
     cmd_col: str,
     meas_col: str,
+    nb: int,
+    nf: int,
+    nk: int,
+    max_nfev: int,
 ) -> dict[str, object]:
     """Fit one wheel on the ID dataset and evaluate on both ID and validation data."""
 
     u_id = id_df[cmd_col].to_numpy(dtype=float)
     y_id = id_df[meas_col].to_numpy(dtype=float)
-    a, b, start_idx = fit_arx_model(u_id, y_id)
+    f, b, idx0, solver = fit_oe_model(u_id, y_id, nb=nb, nf=nf, nk=nk, max_nfev=max_nfev)
 
-    y_id_sim = simulate_arx_model(u_id, y_id, a, b, start_idx)
-    id_metrics = fit_metric(y_id[start_idx:], y_id_sim[start_idx:])
+    y_id_sim = simulate_oe_model(u_id, y_id, f, b, nk)
+    id_metrics = fit_metric(y_id[idx0:], y_id_sim[idx0:])
 
     u_val = val_df[cmd_col].to_numpy(dtype=float)
     y_val = val_df[meas_col].to_numpy(dtype=float)
-    y_val_sim = simulate_arx_model(u_val, y_val, a, b, start_idx)
-    val_metrics = fit_metric(y_val[start_idx:], y_val_sim[start_idx:])
+    y_val_sim = simulate_oe_model(u_val, y_val, f, b, nk)
+    val_metrics = fit_metric(y_val[idx0:], y_val_sim[idx0:])
 
-    props = arx_properties(a, b)
+    props = oe_properties(f, b)
     return {
-        "a": a,
+        "f": f,
         "b": b,
-        "start_idx": start_idx,
+        "start_idx": idx0,
         "id_sim": y_id_sim,
         "val_sim": y_val_sim,
         "id_metrics": id_metrics,
@@ -257,11 +333,19 @@ def evaluate_wheel(
         "poles": props["poles"],
         "stable": props["stable"],
         "dc_gain": props["dc_gain"],
+        "solver_success": bool(solver.success),
+        "solver_status": int(solver.status),
+        "solver_nfev": int(solver.nfev),
+        "solver_cost": float(solver.cost),
+        "solver_message": str(solver.message),
     }
 
 
 def format_complex_pair(values: np.ndarray) -> str:
     """Format poles compactly for terminal output."""
+
+    if len(values) == 0:
+        return "none"
 
     parts = []
     for value in values:
@@ -273,9 +357,9 @@ def format_complex_pair(values: np.ndarray) -> str:
 
 
 def print_summary(name: str, result: dict[str, object]) -> None:
-    """Print a compact ARX parameter and fit summary."""
+    """Print a compact OE parameter and fit summary."""
 
-    a = np.asarray(result["a"], dtype=float)
+    f = np.asarray(result["f"], dtype=float)
     b = np.asarray(result["b"], dtype=float)
     id_metrics = result["id_metrics"]
     val_metrics = result["val_metrics"]
@@ -284,10 +368,10 @@ def print_summary(name: str, result: dict[str, object]) -> None:
     dc_gain = result["dc_gain"]
 
     print(f"\n{name} wheel")
-    print(f"  a1           = {a[0]:.6f}")
-    print(f"  a2           = {a[1]:.6f}")
-    print(f"  b1           = {b[0]:.6f}")
-    print(f"  b2           = {b[1]:.6f}")
+    for idx, value in enumerate(f, start=1):
+        print(f"  f{idx:<11}= {value:.6f}")
+    for idx, value in enumerate(b, start=1):
+        print(f"  b{idx:<11}= {value:.6f}")
     print(f"  ID fit [%]   = {id_metrics['fit_percent']:.2f}")
     print(f"  ID RMSE      = {id_metrics['rmse']:.4f} rad/s")
     print(f"  VAL fit [%]  = {val_metrics['fit_percent']:.2f}")
@@ -298,10 +382,13 @@ def print_summary(name: str, result: dict[str, object]) -> None:
         print("  dc_gain      = not reported (denominator nearly singular)")
     else:
         print(f"  dc_gain      = {float(dc_gain):.4f} rad/s per rad/s")
+    print(f"  solver ok    = {bool(result['solver_success'])}")
+    print(f"  solver nfev  = {int(result['solver_nfev'])}")
+    print(f"  solver cost  = {float(result['solver_cost']):.6f}")
 
 
 def plot_panel(
-    ax,
+    ax: plt.Axes,
     t: np.ndarray,
     y_meas: np.ndarray,
     y_sim: np.ndarray,
@@ -322,7 +409,7 @@ def plot_panel(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Identify second-order ARX Duckiebot wheel-speed models.")
+    parser = argparse.ArgumentParser(description="Identify OE Duckiebot wheel-speed models.")
     parser.add_argument("id_csv", help="CSV used for identification")
     parser.add_argument(
         "--val-csv",
@@ -337,11 +424,27 @@ def main() -> None:
         default=None,
         help="Optional resampling time step [s]. Otherwise use the ID median timestamp spacing.",
     )
+    parser.add_argument("--nb", type=int, default=NB, help="Number of input numerator coefficients.")
+    parser.add_argument("--nf", type=int, default=NF, help="Number of output denominator coefficients.")
+    parser.add_argument("--nk", type=int, default=NK, help="Input delay in samples.")
+    parser.add_argument(
+        "--meas-signal",
+        choices=["filtered", "raw"],
+        default="filtered",
+        help="Use filtered encoder speed columns or raw differentiated wheel speeds.",
+    )
+    parser.add_argument(
+        "--max-nfev",
+        type=int,
+        default=400,
+        help="Maximum least-squares function evaluations per wheel.",
+    )
     parser.add_argument("--save-plot", default=None, help="Optional path to save the generated figure")
     parser.add_argument("--no-show", action="store_true", help="Do not open the plot window")
     args = parser.parse_args()
 
-    id_raw_df = load_data(args.id_csv)
+    meas_cols = measurement_columns(args.meas_signal)
+    id_raw_df = load_data(args.id_csv, meas_cols)
     Ts_id_raw, jitter_id_raw = estimate_sample_time(id_raw_df["t"].to_numpy())
     Ts = float(args.ts) if args.ts is not None else Ts_id_raw
     id_df, Ts_id_est, jitter_id = prepare_dataset(
@@ -349,6 +452,7 @@ def main() -> None:
         args.wheel_radius,
         args.axle_length,
         Ts,
+        meas_cols,
     )
 
     same_file = args.val_csv is None
@@ -359,17 +463,19 @@ def main() -> None:
         Ts_val_est = Ts_id_est
         jitter_val = jitter_id
     else:
-        val_raw_df = load_data(args.val_csv)
+        val_raw_df = load_data(args.val_csv, meas_cols)
         Ts_val_raw, jitter_val_raw = estimate_sample_time(val_raw_df["t"].to_numpy())
         val_df, Ts_val_est, jitter_val = prepare_dataset(
             val_raw_df,
             args.wheel_radius,
             args.axle_length,
             Ts,
+            meas_cols,
         )
 
-    print("ARX model: y[k] = a1*y[k-1] + a2*y[k-2] + b1*u[k-1] + b2*u[k-2]")
-    print(f"  na={NA}, nb={NB}, nk={NK}")
+    print("OE model: y[k] = -f1*y[k-1] - ... - fnf*y[k-nf] + b1*u[k-nk] + ...")
+    print(f"  nb={args.nb}, nf={args.nf}, nk={args.nk}")
+    print(f"  measurement    = {args.meas_signal}")
     print(f"Identification CSV: {args.id_csv}")
     print(f"  raw estimated Ts = {Ts_id_raw:.6f} s")
     print(f"  raw rel jitter   = {100.0 * jitter_id_raw:.2f} %")
@@ -384,16 +490,32 @@ def main() -> None:
         print(f"  resampled Ts     = {Ts_val_est:.6f} s")
         print(f"  resampled jitter = {100.0 * jitter_val:.2f} %")
 
-    left_result = evaluate_wheel(id_df, val_df, "wL_cmd", "wL_meas")
-    right_result = evaluate_wheel(id_df, val_df, "wR_cmd", "wR_meas")
+    left_result = evaluate_wheel(
+        id_df,
+        val_df,
+        "wL_cmd",
+        meas_cols[0],
+        nb=args.nb,
+        nf=args.nf,
+        nk=args.nk,
+        max_nfev=args.max_nfev,
+    )
+    right_result = evaluate_wheel(
+        id_df,
+        val_df,
+        "wR_cmd",
+        meas_cols[1],
+        nb=args.nb,
+        nf=args.nf,
+        nk=args.nk,
+        max_nfev=args.max_nfev,
+    )
 
     print_summary("Left", left_result)
     print_summary("Right", right_result)
 
     need_plot = (not args.no_show) or bool(args.save_plot)
     if need_plot:
-        import matplotlib.pyplot as plt
-
         ncols = 1 if same_file else 2
         fig, axes = plt.subplots(2, ncols, figsize=(7 * ncols, 8), sharex="col")
         if ncols == 1:
@@ -402,7 +524,7 @@ def main() -> None:
         plot_panel(
             axes[0, 0],
             id_df["t"].to_numpy(dtype=float),
-            id_df["wL_meas"].to_numpy(dtype=float),
+            id_df[meas_cols[0]].to_numpy(dtype=float),
             np.asarray(left_result["id_sim"], dtype=float),
             id_df["wL_cmd"].to_numpy(dtype=float),
             "Left wheel: identification",
@@ -411,7 +533,7 @@ def main() -> None:
         plot_panel(
             axes[1, 0],
             id_df["t"].to_numpy(dtype=float),
-            id_df["wR_meas"].to_numpy(dtype=float),
+            id_df[meas_cols[1]].to_numpy(dtype=float),
             np.asarray(right_result["id_sim"], dtype=float),
             id_df["wR_cmd"].to_numpy(dtype=float),
             "Right wheel: identification",
@@ -422,7 +544,7 @@ def main() -> None:
             plot_panel(
                 axes[0, 1],
                 val_df["t"].to_numpy(dtype=float),
-                val_df["wL_meas"].to_numpy(dtype=float),
+                val_df[meas_cols[0]].to_numpy(dtype=float),
                 np.asarray(left_result["val_sim"], dtype=float),
                 val_df["wL_cmd"].to_numpy(dtype=float),
                 "Left wheel: validation",
@@ -431,7 +553,7 @@ def main() -> None:
             plot_panel(
                 axes[1, 1],
                 val_df["t"].to_numpy(dtype=float),
-                val_df["wR_meas"].to_numpy(dtype=float),
+                val_df[meas_cols[1]].to_numpy(dtype=float),
                 np.asarray(right_result["val_sim"], dtype=float),
                 val_df["wR_cmd"].to_numpy(dtype=float),
                 "Right wheel: validation",
@@ -441,7 +563,7 @@ def main() -> None:
         for ax in axes[-1, :]:
             ax.set_xlabel("time [s]")
 
-        fig.suptitle("Second-order ARX wheel-speed identification", fontsize=14)
+        fig.suptitle("OE wheel-speed identification", fontsize=14)
         fig.tight_layout()
 
         if args.save_plot:
