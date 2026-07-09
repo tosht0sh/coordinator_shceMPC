@@ -3,58 +3,62 @@
         "Big_number": 500,
         "Autonomy": 500,
         "charging_coefficient": 1,
-        "Environment": "CoordScene1", 
+        "Environment": "CoordScene2", 
         "nodes": {
-              "N1":{"x":3,"y":1,"next":["N3"]},
-              "N2":{"x":1,"y":3,"next":["N3"]},
-              "N3":{"x":3,"y":3,"next":["N1", "N2", "N4", "N5"]},
-              "N4":{"x":5,"y":3,"next":["N3"]},
-              "N5":{"x":3,"y":5,"next":["N3"]}
+            "N00":{"x":1,"y":1,"next":["N01", "N10"]},
+            "N10":{"x":1,"y":5,"next":["N00", "N20", "N11"]},
+            "N20":{"x":1,"y":9,"next":["N10", "N21"]},
+            "N01":{"x":5,"y":1,"next":["N00", "N11", "N02"]},
+            "N11":{"x":5,"y":5,"next":["N10", "N21", "N12", "N01"]},
+            "N21":{"x":5,"y":9,"next":["N20", "N11", "N22"]},
+            "N02":{"x":9,"y":1,"next":["N01", "N12"]},
+            "N12":{"x":9,"y":5,"next":["N02", "N11", "N22"]},
+            "N22":{"x":9,"y":9,"next":["N21", "N12"]}
         },
         "hub_nodes": []
     },
     "ATRs": {
-      "A1": "N1",
-      "A2": "N2"
+      "A1": "N01",
+      "A2": "N10"
     },
     "jobs": {
         "01": {
-            "location": "N1",
+            "location": "N01",
             "precedence": [],
             "TW": [],
             "Service": 0,
             "ATR": ["A1"]
         },
         "02": {
-            "location": "N3",
+            "location": "N11",
             "precedence": ["01"],
             "TW": [],
             "Service": 0,
             "ATR": ["A1"]
         },
         "03": {
-            "location": "N5",
+            "location": "N10",
             "precedence": ["02"],
             "TW": [],
             "Service": 0,
             "ATR": ["A1"]
         },
         "11": {
-            "location": "N2",
+            "location": "N10",
             "precedence": [],
             "TW": [],
             "Service": 0,
             "ATR": ["A2"]
         },
         "12": {
-            "location": "N3",
+            "location": "N11",
             "precedence": ["11"],
             "TW": [],
             "Service": 0,
             "ATR": ["A2"]
         },
         "13": {
-            "location": "N4",
+            "location": "N12",
             "precedence": ["12"],
             "TW": [],
             "Service": 0,

@@ -360,10 +360,10 @@ class CasadiNMPC:
             #total_cost +=  ca.sum1(e_dynamic_k)#1e2 * ca.sum1(e_dynamic_k) + 1e4 * ca.sum1(e_dynamic_k**2)
             # total_cost += rho_stc * ca.sum1(e_static_k**2)
             # total_cost += rho_dyn * ca.sum1(e_dynamic_k**2)
-            v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
-            v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
-            v = ca.vertcat(v_stc, v_dyn)
-            total_cost += self._rho_pen * ca.dot(v,v)
+            # v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
+            # v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
+            # v = ca.vertcat(v_stc, v_dyn)
+            # total_cost += self._rho_pen * ca.dot(v,v)
 
             prev_v = u_k[0]
             prev_w = u_k[1]

@@ -83,7 +83,7 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     graph_path = os.path.join(data_dir, f"{EnvFolder}/graph.json")
 
     ## Load schedule of orignal problem
-    # schedule_path = os.path.join(data_dir, "schedule.csv")
+    schedule_path = os.path.join(data_dir, "schedule.csv")
     # start_path = os.path.join(data_dir, "robot_start.json")
 
     ## Load schedule of SingleRobot
@@ -94,9 +94,10 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     # schedule_path = os.path.join(data_dir, "schedule_TwoRobots.csv")
     # start_path = os.path.join(data_dir, "robot_start_TwoRobots.json")
 
-    ## Load schedule of CoordScene1
-    schedule_path = os.path.join(data_dir, "schedule_CoordScene1.csv")
-    start_path = os.path.join(data_dir, "robot_start_CoordScene1.json")
+    ## Load schedule of CoordScene1 & CoordScene2
+    # schedule_path = os.path.join(data_dir, "schedule_CoordScene1.csv")
+    # schedule_path = os.path.join(data_dir, "schedule_CoordScene2.csv")
+    start_path = os.path.join(data_dir, "robot_start_CoordScene2.json")
 
     ## Open schedule
     with open(start_path, "r") as f:
@@ -161,6 +162,7 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
         visualizer.plot(main_plotter.map_ax, *robot.state)
 
     actual_timetable = {rid: [] for rid in robot_ids}
+
     udp_state_reader = None
     live_pose_announced = set()
     missing_map_announced = set()
@@ -175,9 +177,14 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
         incomplete = False
 
         clash = None
+
+        # this conditon just to avoid caculations in first step leading to false values
+        if kt > 2:
+            coord.update_time(kt*config_mpc.ts)
         
         for i, rid in enumerate(robot_ids):
-
+            # print(f'[run_mpc] {i}')
+            
             robot = robot_manager.get_robot(rid)
             planner = robot_manager.get_planner(rid)
             controller = robot_manager.get_controller(rid)
@@ -185,15 +192,25 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
             using_live_state = False
 
-            # removing from coord based dictionaries
-            if rid in coord_shifted_targets_compensated.keys():
-                if np.linalg.norm(np.asarray(robot.state[:2]) - coord_shifted_targets_compensated[rid]['new_target']) < 0.1:
+            if controller.idle:
+                main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
+                continue
+
+            # Keep the detour active while the planner targets either the
+            # conflict node or a pseudo node outside the graph.
+            if rid in coord_shifted_targets_compensated:
+                compensation = coord_shifted_targets_compensated[rid]
+                current_node = gpc.get_node_id(planner._current_target_node)
+
+                if (
+                    current_node is not None
+                    and current_node != compensation['parent_node']
+                ):
                     coord_shifted_targets.pop(rid, None)
                     coord_shifted_targets_compensated.pop(rid, None)
 
             # creating a new planning with new target
             if kt > 2 and rid in coord_shifted_targets.keys():
-                # print(f'{rid}: {coord_shifted_targets_compensated}')
 
                 if rid in coord_shifted_targets_compensated.keys():
                     if coord_shifted_targets_compensated[rid]['new_target'] == coord_shifted_targets[rid]:
@@ -201,15 +218,15 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
                     else:
                         new_plan = create_new_planner(config_mpc, config_robot, VERBOSE, gpc, robot.state, kt * config_mpc.ts, planner, coord_shifted_targets[rid])
                         robot_manager.set_planner(rid, new_plan)
-                        
+                        planner = new_plan
 
-                        coord_shifted_targets_compensated[rid] = coord_shifted_targets[rid]
+                        coord_shifted_targets_compensated[rid]['new_target'] = coord_shifted_targets[rid]
                 else:
                     current_target_node = gpc.get_node_id(planner._current_target_node)
-
+                    
                     new_plan = create_new_planner(config_mpc, config_robot, VERBOSE, gpc, robot.state, kt * config_mpc.ts, planner, coord_shifted_targets[rid])
                     robot_manager.set_planner(rid, new_plan)
-
+                    planner = new_plan
                     coord_shifted_targets_compensated[rid] = {'parent_node': current_target_node, 'new_target': coord_shifted_targets[rid]}
 
             # get reference traj build [was here previously]
@@ -224,13 +241,22 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             # updates for coordinator
             coord.update_horizon(rid, ref_states)
             coord.update_curr_pose(rid, robot.state[:2])
-            if rid in coord_shifted_targets_compensated.keys():
+            print(f'[run_mpc] {rid} state vector: {robot.state}')
+            # print(coord_shifted_targets_compensated)
+            # print(coord_shifted_targets)
+
+            print(f'{rid} plan: {planner._ref_path}')
+
+            if rid in coord_shifted_targets_compensated:
                 print('sending pseudo node')
-                coord.update_target_nodes(rid, coord_shifted_targets_compensated[rid]['parent_node'])
+                coord.update_target_nodes(
+                    rid,
+                    coord_shifted_targets_compensated[rid]['parent_node'],
+                )
             else:
                 coord.update_target_nodes(rid, gpc.get_node_id(planner._current_target_node))
-            
-            # this conditon just to avoid caculations in first step leading to false values
+
+            # print(f'{rid}: {clash}')
             if kt > 2:
                 clash = coord.validate()
 
@@ -340,8 +366,9 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
 
 
 def create_new_planner(config_mpc, config_robot, VERBOSE, gpc, state, mpc_ts, old_plan, coord_change):
-    """ Creartes a new plan when coordinator wants it to """
+    """ Creates a new plan when coordinator wants it to """
 
+    print(f'Replan trigered \n\n\n\n\n\n\n\n')
     crossing_planner = LocalTrajPlanner(
                         config_mpc.ts,
                         config_mpc.N_hor,
@@ -360,18 +387,14 @@ def create_new_planner(config_mpc, config_robot, VERBOSE, gpc, state, mpc_ts, ol
     
     if base_path is not None and base_idx is not None and base_idx + 1 < len(base_path):
         resume_xy = tuple(base_path[base_idx + 1])
+
         if resume_xy != shifted_xy:
-            path_coords.append(resume_xy)
+            path_coords.extend(base_path[(base_idx + 1):])
 
     if base_times is not None and base_idx is not None:
         shifted_eta = max(float(base_times[base_idx]), mpc_ts + old_plan.ts)
         path_times = [mpc_ts, shifted_eta]
-
-        if len(path_coords) == 3 and base_idx + 1 < len(base_times):
-            resume_eta = max(float(base_times[base_idx + 1]), shifted_eta + old_plan.ts)
-            path_times.append(resume_eta)
-    else:
-        path_times = None
+        path_times.extend(base_times[(base_idx + 1):])
 
     crossing_planner.load_path(
         path_coords,
@@ -381,11 +404,3 @@ def create_new_planner(config_mpc, config_robot, VERBOSE, gpc, state, mpc_ts, ol
     )
 
     return crossing_planner
-
-
-# next steps:
-# 1. [done] correct the node tracking in coordinator.py, it fails now as it is related to target_coords 
-#   which won't work with the shifted system. 
-# 2. [done] updating of remaining nodes not working in coordinator.py
-# 3. fix todo in coordinator.py
-# 4. [done] remove nodes from coordshifted targets and compensated dict once target it reached 

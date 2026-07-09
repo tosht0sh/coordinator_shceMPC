@@ -27,7 +27,7 @@ def schedule(the_instance, current_routes):
     ### COMMENT THIS ON (AND THE LINE IN CONSTRAINT one_node_at_a_time TO ALLOW HUB NODES #####
     # hubs = [i.depot for i in idle_atrs]
 
-    SafetyCoefficient = 20
+    SafetyCoefficient = 1 #20
 
     # a variable for each node (operation) of each route (job)
     visit_node = [[Real('vehicle_%s_VISITS_node_%s' % (i.vehicle, j_index))
@@ -181,35 +181,38 @@ def schedule(the_instance, current_routes):
     # HERE I BUILD UP THE MODEL FOR THE SCHEDULING PROBLEM
     set_option(rational_to_decimal=True)
     set_option(precision=2)
-    if False:
+    if True:
         scheduling = Optimize()
 
         scheduling.minimize(
             # penalize vehicles from getting to the goal later/earlier than in the middle
             # of the time window
-            Sum([
-                Abs(visit_node[i_index][j_index] - ((j[1] - j[0]) / 2))
-                for i_index, i in enumerate(routes_plus_idle)
-                for j_index, j in enumerate(i.TW)
-                if j != []
-            ])
-            +
-            # discourage vehicels from waiting at nodes
-            Sum([
-                (leave_node[i_index][j] - visit_node[i_index][j])
-                for i_index, i in enumerate(routes_plus_idle)
-                for j, _ in enumerate(i.nodes)
-                if j != 0 and j != len(i.nodes)
-            ])
+            # Sum([
+            #     Abs(visit_node[i_index][j_index] - ((j[1] - j[0]) / 2))
+            #     for i_index, i in enumerate(routes_plus_idle)
+            #     for j_index, j in enumerate(i.TW)
+            #     if j != []
+            # ])
+            # +
+            # # discourage vehicels from waiting at nodes
+            # Sum([
+            #        (leave_node[i_index][j] - visit_node[i_index][j])
+            #     for i_index, i in enumerate(routes_plus_idle)
+            #     for j, _ in enumerate(i.nodes)
+            #     if j != 0 and j != len(i.nodes)
+            # ])
             # -
             # encourage delay between vehicles start
             # 1000*Sum([delayed_start[i] for i in range(len(routes_plus_idle))])
-            +
+            # +
             # encourage vehicle to be as fast as possible
             Sum([
                 visit_node[i_index][j]
                 for i_index, i in enumerate(routes_plus_idle)
                 for j, _ in enumerate(i.nodes)
+                # visit_node[i_index][len(i.nodes)-1]
+                # for i_index, i in enumerate(routes_plus_idle)
+
             ])
         )
     else:
@@ -226,8 +229,8 @@ def schedule(the_instance, current_routes):
         staying_at_a_node +
         one_node_at_a_time +
         edges_direct +
-        edges_inverse +
-        delayed_start
+        edges_inverse 
+        # delayed_start
     )
 
     nodes_schedule = {}

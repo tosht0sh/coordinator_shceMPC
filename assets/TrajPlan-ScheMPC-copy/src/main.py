@@ -45,12 +45,13 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         run_mpc(EnvFolder, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref, recording=recording)
 
 if __name__ == "__main__":
-    problem = '4Small' # SAFETY COEFF 20
+    problem = '4Small_cs1' # SAFETY COEFF 20
+    # problem = '4Small_cs2' # SAFETY COEFF 20
     # problem = "10Large"
 
     general_funct(
         problem,
-        scheduler = False,
+        scheduler = True,
         controller= True,
         naive_tracker= False,
         ignore_speed_ref= False,
