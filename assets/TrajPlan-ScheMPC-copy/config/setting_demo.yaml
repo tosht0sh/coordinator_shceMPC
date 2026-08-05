@@ -9,4 +9,4 @@ schedule_file: Schedule_4Small.csv
 ### Config
 config_robot_file: robot_spec.yaml
 
-config_mpc_file: mpc_fast.yaml
+config_mpc_file: mpc_fast_sim.yaml

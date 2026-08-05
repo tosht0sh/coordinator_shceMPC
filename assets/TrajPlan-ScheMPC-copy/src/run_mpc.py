@@ -21,6 +21,8 @@ from configs import CircularRobotSpecification
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
+from coordinator.coordinator import Coordinator
+
 def _env_bool(name, default=False):
     raw = os.getenv(name)
     if raw is None:
@@ -46,76 +48,15 @@ def _load_robot_vehicle_map():
         return {}
     return {str(k): str(v) for k, v in loaded.items()}
 
-
-class UdpPoseReceiver:
-    """Collect latest robot poses from UDP packets produced by pose_sender_udp."""
-    def __init__(self, bind_ip, bind_port, stale_timeout=0.5):
-        self._stale_timeout = max(0.0, float(stale_timeout))
-        self._latest_pose = {}
-        self._last_vehicle = None
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.bind((bind_ip, int(bind_port)))
-        self._sock.setblocking(False)
-
-    def poll(self, max_packets=64):
-        for _ in range(max_packets):
-            try:
-                packet, _ = self._sock.recvfrom(4096)
-            except BlockingIOError:
-                break
-            except OSError as e:
-                print(f"[MPC] UDP pose receive failed: {e}")
-                break
-
-            try:
-                data = json.loads(packet.decode("utf-8"))
-                vehicle = str(data["vehicle"])
-                x = float(data["x"])
-                y = float(data["y"])
-                theta = _wrap_to_pi(float(data["theta"]))
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                continue
-
-            self._latest_pose[vehicle] = (np.asarray([x, y, theta], dtype=float), time.monotonic())
-            self._last_vehicle = vehicle
-
-    def get_state(self, vehicle=None):
-        if not self._latest_pose:
-            return None
-
-        selected_vehicle = vehicle if vehicle in self._latest_pose else self._last_vehicle
-        if selected_vehicle is None:
-            return None
-
-        state, stamp = self._latest_pose[selected_vehicle]
-        age = time.monotonic() - stamp
-        if age > self._stale_timeout:
-            return None
-        return state.copy()
-
-    def close(self):
-        self._sock.close()
-
-def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=False):
+def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=False, recording=False):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
-    CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
+    CFG_FNAME = "mpc_fast_sim.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
     MAP_ONLY = True
     AUTORUN = True # if false, press key (in the plot window) to continue
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = True
     TIMEOUT = 10000
-
-    # environment configs for UDP
-    #USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) # To run simulation with simulated data
-    # keep USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) if you want to use real data from
-    # the robot use USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", True)
-    # or export MPC_USE_UDP_STATE=1
-    # UDP_BIND_IP = os.getenv("MPC_UDP_BIND_IP", "0.0.0.0")
-    # UDP_PORT = int(os.getenv("MPC_UDP_PORT", "5005"))
-    # UDP_STATE_TIMEOUT = float(os.getenv("MPC_UDP_STATE_TIMEOUT", "0.5"))
-    # DEFAULT_VEHICLE = os.getenv("MPC_DEFAULT_VEHICLE", "").strip() or None
     
     robot_vehicle_map = _load_robot_vehicle_map() # TODO: what is this line doing exactly?
 
@@ -146,12 +87,21 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     # start_path = os.path.join(data_dir, "robot_start.json")
 
     ## Load schedule of SingleRobot
-    schedule_path = os.path.join(data_dir, "schedule_SingleRobot.csv")
-    start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
+    # schedule_path = os.path.join(data_dir, "schedule_SingleRobot.csv")
+    # start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
 
     ## Load schedule of TwoRobots
     # schedule_path = os.path.join(data_dir, "schedule_TwoRobots.csv")
     # start_path = os.path.join(data_dir, "robot_start_TwoRobots.json")
+
+    ## Load schedule of CoordScene1 & CoordScene2
+    # schedule_path = os.path.join(data_dir, "schedule_CoordScene1.csv")
+    # schedule_path = os.path.join(data_dir, "schedule_CoordScene2.csv")
+    # start_path = os.path.join(data_dir, "robot_start_CoordScene2.json")
+
+    ## Load schedule of CoordScene1 & CoordScene2
+    schedule_path = os.path.join(data_dir, "schedule_CoordScene3.csv")
+    start_path = os.path.join(data_dir, "robot_start_CoordScene3.json")
 
     ## Open schedule
     with open(start_path, "r") as f:
@@ -164,6 +114,16 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     robot_ids = gpc.robot_ids if robot_ids is None else robot_ids
     boundary_coords = gpc.current_map.boundary_coords
     static_obstacles = gpc.inflated_map.obstacle_coords_list
+
+    ### Set up for coodinator
+    coord = Coordinator.from_csv(schedule_path)
+    coord.load_graph_from_json(graph_path)
+    coord.save_jobs(jobs_list)
+    coord.save_initial_route(routes)
+
+    coord_shifted_targets = {}
+    coord_shifted_targets_compensated = {}
+    coord_handoff_planners = {}
 
     ### Set up robots
     robot_manager = RobotManager()
@@ -179,6 +139,9 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
         robot_manager.add_robot(robot, controller, planner, visualizer)
 
         path_coords, path_times = gpc.get_robot_schedule(rid)
+        # print(f'pc: {path_coords}, pt: {path_times}')
+        # print(gpc.get_robot_schedule(rid))
+
         robot_manager.add_schedule(rid, np.asarray(robot_starts[str(rid)]), path_coords, path_times)
 
     ### Run
@@ -205,40 +168,29 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
         visualizer.plot(main_plotter.map_ax, *robot.state)
 
     actual_timetable = {rid: [] for rid in robot_ids}
+
     udp_state_reader = None
     live_pose_announced = set()
     missing_map_announced = set()
     idle_stop_sent = set()      # to stop idle state sending 0 speed multiple times
 
-    # if USE_UDP_STATE:
-    #     try:
-    #         udp_state_reader = UdpPoseReceiver(UDP_BIND_IP, UDP_PORT, stale_timeout=UDP_STATE_TIMEOUT)
-    #         print(f"[MPC] Listening for UDP poses on {UDP_BIND_IP}:{UDP_PORT}")
-    #         if robot_vehicle_map:
-    #             print(f"[MPC] Robot to vehicle mapping: {robot_vehicle_map}")
-    #     except OSError as e:
-    #         print(f"[MPC] Failed to start UDP pose receiver ({e}). Falling back to simulated state.")
-    #         udp_state_reader = None
-
-    
-    ## command action sending variables + socket settings
-    # v = 0.0
-    # w = 0.0
-    # tcp_port = 5006
-    # robot_ip = "192.168.1.197" # for CASELAB wifi
-    # # robot_ip = "10.42.0.129" # for laptop hotspot
-
-    # with socket.create_connection((robot_ip, tcp_port), timeout=5.0) as sock:
-    #     print(f"Streaming command pose at {robot_ip}:{tcp_port}.")
 
     for kt in range(TIMEOUT):
-        if udp_state_reader is not None:
-            udp_state_reader.poll()
+        if kt == 2:                         # this is added as for some reason in the first step it always adds all robots as crossing node
+            coord_shifted_targets.clear()
+
         robot_states = []
         incomplete = False
+
+        clash = None
+
+        # this conditon just to avoid caculations in first step leading to false values
+        if kt > 2:
+            coord.update_time(kt*config_mpc.ts)
+        
         for i, rid in enumerate(robot_ids):
-            # if rid != 'A1':
-            #     continue
+            # print(f'[run_mpc] {i}')
+            
             robot = robot_manager.get_robot(rid)
             planner = robot_manager.get_planner(rid)
             controller = robot_manager.get_controller(rid)
@@ -246,31 +198,44 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
             using_live_state = False
 
-            # if udp_state_reader is not None:
-            #     mapped_vehicle = robot_vehicle_map.get(str(rid))
-            #     if mapped_vehicle is None:
-            #         if len(robot_ids) == 1:
-            #             mapped_vehicle = DEFAULT_VEHICLE
-            #         elif rid not in missing_map_announced:
-            #             print(f"[MPC] No vehicle mapping for robot '{rid}'. Using simulated state for this robot.")
-            #             print("[MPC] Set MPC_ROBOT_VEHICLE_MAP, example: {\"A1\": \"duckiebot\"}")
-            #             missing_map_announced.add(rid)
-
-            #     live_state = udp_state_reader.get_state(mapped_vehicle)
-            #     if live_state is not None:
-            #         robot.set_state(live_state)
-            #         using_live_state = True
-            #         if rid not in live_pose_announced:
-            #             source = mapped_vehicle if mapped_vehicle is not None else "latest UDP sender"
-            #             print(f"[MPC] Using live pose for robot '{rid}' from '{source}'.")
-            #             live_pose_announced.add(rid)
-
             if controller.idle:
-                duck_payload = json.dumps({"v": 0.0, "w": 0.0}) + "\n"
-                #sock.sendall(duck_payload.encode("utf-8"))
                 main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
                 continue
-            
+
+            # Keep the detour active while the planner targets either the
+            # conflict node or a pseudo node outside the graph.
+            if rid in coord_shifted_targets_compensated:
+                compensation = coord_shifted_targets_compensated[rid]
+                current_node = gpc.get_node_id(planner._current_target_node)
+
+                if (
+                    current_node is not None
+                    and current_node != compensation['parent_node']
+                ):
+                    coord_shifted_targets.pop(rid, None)
+                    coord_shifted_targets_compensated.pop(rid, None)
+
+            # creating a new planning with new target
+            if kt > 2 and rid in coord_shifted_targets.keys():
+
+                if rid in coord_shifted_targets_compensated.keys():
+                    if coord_shifted_targets_compensated[rid]['new_target'] == coord_shifted_targets[rid]:
+                        print('Already compensated for this change')
+                    else:
+                        new_plan = create_new_planner(config_mpc, config_robot, VERBOSE, gpc, robot.state, kt * config_mpc.ts, planner, coord_shifted_targets[rid])
+                        robot_manager.set_planner(rid, new_plan)
+                        planner = new_plan
+
+                        coord_shifted_targets_compensated[rid]['new_target'] = coord_shifted_targets[rid]
+                else:
+                    current_target_node = gpc.get_node_id(planner._current_target_node)
+                    
+                    new_plan = create_new_planner(config_mpc, config_robot, VERBOSE, gpc, robot.state, kt * config_mpc.ts, planner, coord_shifted_targets[rid])
+                    robot_manager.set_planner(rid, new_plan)
+                    planner = new_plan
+                    coord_shifted_targets_compensated[rid] = {'parent_node': current_target_node, 'new_target': coord_shifted_targets[rid]}
+
+            # get reference traj build [was here previously]
             ref_states, ref_speed, *_ = planner.get_local_ref(
                 kt*config_mpc.ts, 
                 (float(robot.state[0]), float(robot.state[1])), 
@@ -278,34 +243,141 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
                 ignore_speed_ref=ignore_speed_ref
             )
 
-            print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
-            controller.set_current_state(robot.state)
-            controller.set_ref_states(ref_states, ref_speed=ref_speed)
-            print(f"Robot_state {robot.state[0]}" )
-            
-            if naive_tracker:
-                (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+
+            # updates for coordinator
+            coord.update_horizon(rid, ref_states)
+            coord.update_curr_pose(rid, robot.state[:2])
+            print(f'[run_mpc] {rid} state vector: {robot.state}')
+            # print(coord_shifted_targets_compensated)
+            # print(coord_shifted_targets)
+
+            print(f'{rid} plan: {planner._ref_path}')
+
+            if rid in coord_handoff_planners:
+                handoff_node = coord_handoff_planners[rid]
+
+                coord.update_target_nodes(
+                    rid, coord_handoff_planners[rid]
+                )
+
+                node_x, node_y = gpc.current_graph.get_node_coord(handoff_node)
+
+                dx = float(robot.state[0]) - node_x
+                dy = float(robot.state[1]) - node_y
+
+                if dx**2 + dy**2 < 0.40**2:
+                    coord.handoff_reached(rid)
+
+            elif rid in coord_shifted_targets_compensated:
+                print('sending pseudo node')
+                coord.update_target_nodes(
+                    rid,
+                    coord_shifted_targets_compensated[rid]['parent_node'],
+                )
             else:
-                (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
-                                                            full_dyn_obstacle_list=None,
-                                                            other_robot_states=other_robot_states,
-                                                            map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+                coord.update_target_nodes(rid, gpc.get_node_id(planner._current_target_node))
+
+            replacement = coord.take_ready_replan(rid)
+            if replacement:
+                new_planner = create_replanned_planner(config_mpc, config_robot, VERBOSE, gpc, rid, replacement)
+                robot_manager.set_planner(rid, new_planner)
+                planner = new_planner
+
+                coord.apply_replan_result(rid, replacement)
+                coord_handoff_planners.pop(rid, None)
+
+                ref_states, ref_speed, *_ = planner.get_local_ref(
+                    kt * config_mpc.ts,
+                    (
+                        float(robot.state[0]),
+                        float(robot.state[1]),
+                    ),
+                    idx_check_range=5,
+                    ignore_speed_ref=ignore_speed_ref,
+                )
+
+                coord.update_horizon(
+                    rid,
+                    ref_states,
+                )
+
+                print(f"\n\n[run_mpc] Installed replacement for {rid}: {replacement['routes'][rid]['nodes']}")
+
+            # print(f'{rid}: {clash}')
+            if kt > 2:
+                clash = coord.validate()
+
+            # changing things based on validation from coordinator
+            if clash and  rid in clash:
+                if clash[rid]['mode'] == "handoff":
+                    
+                    if rid not in coord_handoff_planners:
+                        handoff_planner = create_handoff_planner(config_mpc, config_robot, VERBOSE,
+                                                                gpc, robot.state, kt*config_mpc.ts,
+                                                                planner, clash[rid]["target_coord"])
+
+                        robot_manager.set_planner(rid, handoff_planner)
+                        planner = handoff_planner
+                        coord_handoff_planners[rid] = clash[rid]["target_coord"]
+
+                        ref_states, ref_speed, *_ = planner.get_local_ref(kt*config_mpc.ts,
+                                                                        (float(robot.state[0]), float(robot.state[1])),
+                                                                        idx_check_range=5,
+                                                                        ignore_speed_ref=ignore_speed_ref)
+
+                        coord.update_horizon(rid, ref_states)
+
+                    controller.set_current_state(robot.state)
+                    controller.set_ref_states(ref_states, ref_speed=ref_speed)
+                
+                    if naive_tracker:
+                        (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+                    else:
+                        (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
+                                                                    full_dyn_obstacle_list=None,
+                                                                    other_robot_states=other_robot_states,
+                                                                    map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+
+                if clash[rid]['mode'] == 'stopped':     # stopping from moving
+                    print(f'Coordinator stopping {rid}')
+                    actions = [np.array([0.0, 0.0])]
+                    pred_states = np.array([robot.state.copy()] * config_mpc.N_hor)
+                    current_refs = ref_states
+                    debug_info = {"cost": 0.0, "step_runtime": 0.0, "monitored_cost": None}
+
+                if clash[rid]['mode'] == 'crossing':    # moving towards shifted target
+                    print(f'{rid} crossing node with shifterd target coords ')
+
+                    if rid not in coord_shifted_targets.keys():     # adding to dict to maintain tracking
+                        coord_shifted_targets.update({rid: clash[rid]['target_coord']})
+
+                    print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
+                    controller.set_current_state(robot.state)
+                    controller.set_ref_states(ref_states, ref_speed=ref_speed)
+                
+                    if naive_tracker:
+                        (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+                    else:
+                        (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
+                                                                    full_dyn_obstacle_list=None,
+                                                                    other_robot_states=other_robot_states,
+                                                                    map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+
+            else:
+                print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
+                controller.set_current_state(robot.state)
+                controller.set_ref_states(ref_states, ref_speed=ref_speed)
+                
             
-            ############################################################################################################################
-            # DATA TO SEND TO BOTS
-            ############################################################################################################################
-            # What to insert from the robot
-            # x = float(robot.state[0]) # x pos
-            # y = float(robot.state[1]) # y pos
-            # theta = float(robot.state[2]) # theta
-
-            # v = float(actions[-1][0]) # linear vel
-            # w = float(actions[-1][1]) # anglar vel
-
-            # duck_payload = json.dumps({"v": round(v, 3), "w": round(w, 3)}) + "\n"
-            # duck_data = duck_payload.encode("utf-8")
-            # sock.sendall(duck_data)
-
+                if naive_tracker:
+                    (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+                else:
+                    (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
+                                                                full_dyn_obstacle_list=None,
+                                                                other_robot_states=other_robot_states,
+                                                                map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+        
+            # reporting [was here previously]
             controller.report_cost(debug_info['cost'],
                                     debug_info['step_runtime'],
                                     debug_info['monitored_cost'],
@@ -367,3 +439,138 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
         plt.show()
 
     return None
+
+
+def create_new_planner(config_mpc, config_robot, VERBOSE, gpc, state, mpc_ts, old_plan, coord_change):
+    """ Creates a new plan when coordinator wants it to """
+
+    print(f'Replan trigered \n\n\n\n\n\n\n\n')
+    crossing_planner = LocalTrajPlanner(
+                        config_mpc.ts,
+                        config_mpc.N_hor,
+                        config_robot.lin_vel_max,
+                        verbose=VERBOSE,
+                    )
+    crossing_planner.load_map(gpc.inflated_map.boundary_coords, gpc.inflated_map.obstacle_coords_list)
+
+    current_xy = (float(state[0]), float(state[1]))
+    shifted_xy = (float(coord_change[0]), float(coord_change[1]))
+    path_coords = [current_xy, shifted_xy]
+
+    base_path = old_plan._ref_path
+    base_times = old_plan._ref_path_time
+    base_idx = old_plan._current_target_node_idx
+    
+    if base_path is not None and base_idx is not None and base_idx + 1 < len(base_path):
+        resume_xy = tuple(base_path[base_idx + 1])
+
+        if resume_xy != shifted_xy:
+            path_coords.extend(base_path[(base_idx + 1):])
+
+    if base_times is not None and base_idx is not None:
+        shifted_eta = max(float(base_times[base_idx]), mpc_ts + old_plan.ts)
+        path_times = [mpc_ts, shifted_eta]
+        path_times.extend(base_times[(base_idx + 1):])
+
+    crossing_planner.load_path(
+        path_coords,
+        path_times,
+        nomial_speed=config_robot.lin_vel_max,
+        method="linear",
+    )
+
+    return crossing_planner
+
+
+def create_replanned_planner(config_mpc, config_robot, verbose, gpc, rid, replacement):
+    new_planner = LocalTrajPlanner(
+        config_mpc.ts,
+        config_mpc.N_hor,
+        config_robot.lin_vel_max,
+        verbose=verbose,
+    )
+
+    new_planner.load_map(
+        gpc.inflated_map.boundary_coords,
+        gpc.inflated_map.obstacle_coords_list,
+    )
+
+    replacement_schedule = replacement["solution"][rid]
+
+    path_coords = [
+        gpc.current_graph.get_node_coord(node_id)
+        for node_id, eta in replacement_schedule
+    ]
+
+    path_times = [
+        float(eta)
+        for node_id, eta in replacement_schedule
+    ]
+
+    new_planner.load_path(
+        path_coords,
+        path_times,
+        nomial_speed=config_robot.lin_vel_max,
+        method="linear",
+    )
+
+    return new_planner
+
+def create_handoff_planner(
+    config_mpc,
+    config_robot,
+    verbose,
+    gpc,
+    robot_state,
+    current_time,
+    old_planner,
+    handoff_node,
+):
+    handoff_planner = LocalTrajPlanner(
+        config_mpc.ts,
+        config_mpc.N_hor,
+        config_robot.lin_vel_max,
+        verbose=verbose,
+    )
+
+    handoff_planner.load_map(
+        gpc.inflated_map.boundary_coords,
+        gpc.inflated_map.obstacle_coords_list,
+    )
+
+    current_xy = (
+        float(robot_state[0]),
+        float(robot_state[1]),
+    )
+
+    handoff_xy = (
+        gpc.current_graph.get_node_coord(handoff_node)
+    )
+
+    current_target_index = (
+        old_planner._current_target_node_idx
+    )
+
+    handoff_eta = max(
+        float(
+            old_planner._ref_path_time[
+                current_target_index
+            ]
+        ),
+        current_time + old_planner.ts,
+    )
+
+    handoff_planner.load_path(
+        [
+            current_xy,
+            handoff_xy,
+        ],
+        [
+            current_time,
+            handoff_eta,
+        ],
+        nomial_speed=config_robot.lin_vel_max,
+        method="linear",
+    )
+
+    return handoff_planner

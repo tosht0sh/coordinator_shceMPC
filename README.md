@@ -14,10 +14,43 @@ The folder currently packages currently made are:
 2. Wheel encoder and wheel control node
 3. Imu reader node
 
-## TODOs:
+### TODOs:
 
-1. Analyse how to fix SLIP issue in pose estimation, maybe use EKF or complementary filter
-2. Add proper clock for coordination
+1. Code cleanup
+2. Bot sided MPC Mocap merge verification
+3. Other robot states outside monitor_node.py
+4. 
+
+# Places we need to change settings
+
+## Laptop
+
+1. /assets/mocap/stream.py 
+    - only ip adress, to be done at top after imports.
+2. /assests/mocap/pose_receiver.py
+    - line 10
+3. 4Small.json
+    - rad 6
+4. /assets/TrajPlan-ScheMPC-copy/src/neighbour_relay_node.py
+    - rad 36
+    - rad 43
+        - check ip adresses match the current number of bots and the ip adresses used are correct
+
+## Bot
+
+1. /packages/mpc_runtime/src/bot_mpc_node.py
+    - rad 80
+
+# IP adresses for routing
+
+1. MOCAP Laptop: 192.168.1.8
+2. Tosh Laptop: 192.168.1.9
+3. Kim Laptop: 192.168.1.10
+4. Duck1: 192.168.1.11
+4. Duck2: 192.168.1.12
+4. Duck3: 192.168.1.13
+4. Duck4: 192.168.1.14
+
 
 ## Running ROSCORE on laptop
 

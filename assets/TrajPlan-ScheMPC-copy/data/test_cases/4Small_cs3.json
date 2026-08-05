@@ -1,0 +1,40 @@
+{
+    "test_data": {
+        "Big_number": 500,
+        "Autonomy": 500,
+        "charging_coefficient": 1,
+        "Environment": "CoordScene2", 
+        "nodes": {
+            "N00":{"x":1,"y":1,"next":["N01", "N10"]},
+            "N01":{"x":1,"y":3,"next":["N00", "N11", "N02"]},
+            "N02":{"x":1,"y":5,"next":["N01", "N12"]},
+            "N10":{"x":3,"y":1,"next":["N00", "N20", "N11"]},
+            "N11":{"x":3,"y":3,"next":["N10", "N21", "N12", "N01"]},
+            "N12":{"x":3,"y":5,"next":["N02", "N11", "N22"]},
+            "N20":{"x":5,"y":1,"next":["N10", "N21"]},
+            "N21":{"x":5,"y":3,"next":["N20", "N11", "N22"]},
+            "N22":{"x":5,"y":5,"next":["N21", "N12"]}
+        },
+        "hub_nodes": []
+    },
+    "ATRs": {
+      "A1": "N01",
+      "A2": "N21"
+    },
+    "jobs": {
+        "01": {
+            "location": "N21",
+            "precedence": [],
+            "TW": [],
+            "Service": 0,
+            "ATR": ["A1"]
+        },
+        "11": {
+            "location": "N01",
+            "precedence": [],
+            "TW": [],
+            "Service": 0,
+            "ATR": ["A2"]
+        }
+    }
+}

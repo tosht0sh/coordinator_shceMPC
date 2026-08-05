@@ -149,27 +149,27 @@ class CasadiNMPC:
 
         ### Fleet collision avoidance: J_f =  max(0,Q_f * (d_fleet - distance))**2
         ### used from mpc_cost, cost_fleet_collision.
-        safe_distance = 2 * (self._spec.vehicle_width + self._spec.vehicle_margin)
-        critical_distance = 2 * self._spec.vehicle_width + self._spec.vehicle_margin
-        if k < self._critical_step:
-            cts.cost_fleet = mc.cost_fleet_collision(
-                x_next[:2],
-                self._other_robots_current(),
-                safe_distance=critical_distance,
-                weight=self._large_weight,
-            )
+        # safe_distance = 1 * (self._spec.vehicle_width + self._spec.vehicle_margin)
+        # critical_distance = 1 * self._spec.vehicle_width + self._spec.vehicle_margin
+        # if k < self._critical_step:
+        #     cts.cost_fleet = mc.cost_fleet_collision(
+        #         x_next[:2],
+        #         self._other_robots_current(),
+        #         safe_distance=critical_distance,
+        #         weight=self._large_weight,
+        #     )
 
-        ## Fleet collision avoidance [Predictive]
-        cts.cost_fleet_pred = mc.cost_fleet_collision(
-            x_next[:2],
-            self._other_robots_at_step(k),
-            safe_distance=safe_distance,
-            weight=self._small_weight,
-        )
+        # ## Fleet collision avoidance [Predictive]
+        # cts.cost_fleet_pred = mc.cost_fleet_collision(
+        #     x_next[:2],
+        #     self._other_robots_at_step(k),
+        #     safe_distance=safe_distance,
+        #     weight=self._small_weight,
+        # )
         ### J_O dynamic/static obstacle costs, similar to PANOC implementation.
-        cts.cost_dynobs = self._dynamic_obstacle_current_cost(k, x_next)
+        #cts.cost_dynobs = self._dynamic_obstacle_current_cost(k, x_next)
         cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
-        cts.cost_dynobs_pred = self._dynamic_obstacle_cost(k, x_next, self._q_dyn[k])
+        #cts.cost_dynobs_pred = self._dynamic_obstacle_cost(k, x_next, self._q_dyn[k])
         # penalty_constraints_stcobs = self._penalty_weight * self._static_obstacle_intrusion(x_next)
         # penalty_constraints_dynobs = self._penalty_weight * self._dynamic_obstacle_intrusion(k, x_next)
         return cts.sum() # + penalty_constraints_stcobs + penalty_constraints_dynobs
@@ -360,10 +360,10 @@ class CasadiNMPC:
             #total_cost +=  ca.sum1(e_dynamic_k)#1e2 * ca.sum1(e_dynamic_k) + 1e4 * ca.sum1(e_dynamic_k**2)
             # total_cost += rho_stc * ca.sum1(e_static_k**2)
             # total_cost += rho_dyn * ca.sum1(e_dynamic_k**2)
-            v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
-            v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
-            v = ca.vertcat(v_stc, v_dyn)
-            total_cost += self._rho_pen * ca.dot(v,v)
+            # v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
+            # v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
+            # v = ca.vertcat(v_stc, v_dyn)
+            # total_cost += self._rho_pen * ca.dot(v,v)
 
             prev_v = u_k[0]
             prev_w = u_k[1]

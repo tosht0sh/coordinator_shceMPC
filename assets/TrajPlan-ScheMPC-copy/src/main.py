@@ -10,9 +10,11 @@ data_path = os.path.join(project_root, "data")
 
 
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False):
+    routes = None # TODO: Parse this also in a way where we do not need to run scheduler. (To be done from individual schedules.)
     if scheduler:
         from pkg_sche.sp_comsat.Compo_slim import Compo_slim
-        instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(problem)
+        instance, optimum, running_time, len_previous_routes, paths_changed, solution, routes, jobs_list = Compo_slim(problem)
+        # print(routes)
         # save the schedule (I don't actually need this step, but it is more readable than the csv)
         with open(f"{src_path}/pkg_sche/MPC_input.json",'w') as logfile:
             json.dump(solution, logfile, indent=4)
@@ -42,15 +44,17 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         with open(f"{data_path}/test_cases/{problem}.json",'r') as read_file:
             data = json.load(read_file)
             EnvFolder = data['test_data']['Environment']
-        run_mpc(EnvFolder, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref, recording=recording)
+        run_mpc(EnvFolder, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref, recording=recording, routes=routes, jobs_list=jobs_list)
 
 if __name__ == "__main__":
-    problem = '4Small' # SAFETY COEFF 20
+    # problem = '4Small_cs1' # SAFETY COEFF 20
+    # problem = '4Small_cs2' # SAFETY COEFF 20
+    problem = '4Small_cs3' # SAFETY COEFF 20
     # problem = "10Large"
 
     general_funct(
         problem,
-        scheduler = False,
+        scheduler = True,
         controller= True,
         naive_tracker= False,
         ignore_speed_ref= False,

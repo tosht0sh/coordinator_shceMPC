@@ -3,6 +3,26 @@ from gurobipy import *
 from .classes import Path
 
 def changer(graph, paths_combo, previous_paths=[]):
+    if previous_paths is None:
+        previous_paths = []
+
+    stationary_paths = {
+        route: {
+            pair: path
+            for pair, path in route_paths.items()
+            if pair[0] == pair[1]
+        }
+        for route, route_paths in paths_combo.items()
+    }
+
+    paths_combo = {
+        route: {
+            pair: path
+            for pair, path in route_paths.items()
+            if pair[0] != pair[1]
+        }
+        for route, route_paths in paths_combo.items()
+    }
 
     m = Model('paths_changer')
     m.setParam('OutputFlag', 0)
@@ -101,10 +121,10 @@ def changer(graph, paths_combo, previous_paths=[]):
         for single_solution in previous_paths:
             m.addConstr(
                 quicksum(use_edge[route.id,pair,edge]
-                       for edge in graph.edges
-                            for route in paths_combo
-                                for pair in paths_combo[route]
-                                    if (route,pair,i) in single_solution
+                        for route in paths_combo
+                            for pair in paths_combo[route]
+                                for edge in graph.edges
+                                    if (route, pair, edge) in single_solution
                 ) <= len(single_solution) - 1
             )
 
@@ -199,6 +219,12 @@ def changer(graph, paths_combo, previous_paths=[]):
             }
             for route in new_paths
         }
+
+        for route, route_paths in stationary_paths.items():
+            if route not in new_paths:
+                new_paths[route] = {}
+
+            new_paths[route].update(route_paths)
 
     else:
         solution = []

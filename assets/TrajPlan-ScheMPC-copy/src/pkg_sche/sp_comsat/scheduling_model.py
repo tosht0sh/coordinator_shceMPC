@@ -1,7 +1,7 @@
 from z3 import *
 from .classes import Route
 
-def schedule(the_instance, current_routes):
+def schedule(the_instance, current_routes, frozen_schedules=None, current_time=0.0):
     # i can now start building the model in z3. i am going to treat this part as a standard job shop problem
     # where each node/edge is a resource, each route a job and the nodes to visit are operations.
     # some operations i.e. the deliveries have time windows
@@ -27,7 +27,7 @@ def schedule(the_instance, current_routes):
     ### COMMENT THIS ON (AND THE LINE IN CONSTRAINT one_node_at_a_time TO ALLOW HUB NODES #####
     # hubs = [i.depot for i in idle_atrs]
 
-    SafetyCoefficient = 20
+    SafetyCoefficient = 1 #20
 
     # a variable for each node (operation) of each route (job)
     visit_node = [[Real('vehicle_%s_VISITS_node_%s' % (i.vehicle, j_index))
@@ -168,6 +168,119 @@ def schedule(the_instance, current_routes):
         # and the_instance.graph.get_edge_data(*edge1)['capacity'] == 1
     ]
 
+    # variable for starting schedule at the correct time
+    replanning_start_time = [
+            visit_node[i_index][0] == current_time
+            for i_index, route in enumerate(routes_plus_idle)
+            if route.length > 0
+        ]
+    
+    # when replanning, the robot should not use the node and edges 
+    # at the same time as other robots.
+    frozen_edges = []
+    frozen_node_constraints = []
+    frozen_edge_constraints = []
+
+    if frozen_schedules:
+
+        # creating frozen edges list
+        for frozen_data in frozen_schedules.values():
+            frozen_schedule_list = frozen_data["remaining_schedule"]
+
+            # the frozen schedule robot's current edge is added here
+            frozen_edges.append({
+                "edge": (frozen_data["previous_node"],
+                         frozen_data["current_target_node"]),
+                "start_time": current_time,
+                "end_time": frozen_schedule_list[0]["ETA"]
+            })
+
+            # other edges are added here
+            for current_entry, next_entry in zip(
+                frozen_schedule_list[:-1], frozen_schedule_list[1:]):
+
+                frozen_edges.append({
+                    "edge": (current_entry["node_id"], next_entry["node_id"]),
+                    "start_time": current_entry["ETA"],
+                    "end_time": next_entry["ETA"]
+                })
+
+        # creating frozen node constraints
+        for frozen_data in frozen_schedules.values():
+            for reserved in frozen_data["remaining_schedule"]:
+                frozen_node = reserved["node_id"]
+                frozen_eta = reserved["ETA"]
+
+                for route_index, route in enumerate(routes_plus_idle):
+                    for node_index, route_node in enumerate(route.nodes):
+                        if route_node == frozen_node:
+                            frozen_node_constraints.append(
+                                Or(
+                                    leave_node[route_index][node_index] <= frozen_eta - SafetyCoefficient,
+
+                                    visit_node[route_index][node_index] >= frozen_eta + SafetyCoefficient
+                                )
+                            )
+
+        # frozen edge constraints creation
+        for frozen_edge_data in frozen_edges:
+            frozen_edge = frozen_edge_data["edge"]
+            frozen_start = frozen_edge_data["start_time"]
+            frozen_end = frozen_edge_data["end_time"]
+
+            for route_index, route in enumerate(routes_plus_idle):
+                for edge_index, route_edge in enumerate(route.edges):
+                    if "N99" in route_edge:
+                        route_corridor = set(the_instance.graph.successors("N99"))
+                    else:
+                        route_corridor = set(route_edge)
+
+                    frozen_corridor = set(frozen_edge)
+                    same_physical_edge = (
+                        route_corridor == frozen_corridor
+                    )
+                    # same_edge = route_edge == frozen_edge
+
+                    # opposite_edge = route_edge == (
+                    #     frozen_edge[1], frozen_edge[0]
+                    # )
+
+                    # if same_edge or opposite_edge:
+                    if same_physical_edge:
+                        if "N99" in route.nodes:
+                            n99_index = route.nodes.index("N99")
+
+                            n99_arrival = visit_node[route_index][n99_index]
+                            n99_departure= leave_node[route_index][n99_index]
+
+                            frozen_edge_constraints.append(
+                            Or(
+                                    n99_departure + SafetyCoefficient
+                                    <= frozen_start,
+
+                                    n99_arrival
+                                    >= frozen_end + SafetyCoefficient,
+                                )
+                            )
+
+                        replanned_start = visit_edge[route_index][edge_index]
+
+                        replanned_duration = (
+                            the_instance.graph.get_edge_data(*route_edge)["weight"]
+                        )
+
+                        replanned_end = (
+                            replanned_start + replanned_duration
+                        )
+
+                        frozen_edge_constraints.append(
+                            Or(
+                                replanned_end + SafetyCoefficient <= frozen_start,
+
+                                replanned_start >= frozen_end + SafetyCoefficient,
+                            )
+                        )
+
     delayed_start = [
         And([
             Abs(visit_node[i][2] - visit_node[j][2]) > 20
@@ -181,35 +294,38 @@ def schedule(the_instance, current_routes):
     # HERE I BUILD UP THE MODEL FOR THE SCHEDULING PROBLEM
     set_option(rational_to_decimal=True)
     set_option(precision=2)
-    if False:
+    if True:
         scheduling = Optimize()
 
         scheduling.minimize(
             # penalize vehicles from getting to the goal later/earlier than in the middle
             # of the time window
-            Sum([
-                Abs(visit_node[i_index][j_index] - ((j[1] - j[0]) / 2))
-                for i_index, i in enumerate(routes_plus_idle)
-                for j_index, j in enumerate(i.TW)
-                if j != []
-            ])
-            +
-            # discourage vehicels from waiting at nodes
-            Sum([
-                (leave_node[i_index][j] - visit_node[i_index][j])
-                for i_index, i in enumerate(routes_plus_idle)
-                for j, _ in enumerate(i.nodes)
-                if j != 0 and j != len(i.nodes)
-            ])
+            # Sum([
+            #     Abs(visit_node[i_index][j_index] - ((j[1] - j[0]) / 2))
+            #     for i_index, i in enumerate(routes_plus_idle)
+            #     for j_index, j in enumerate(i.TW)
+            #     if j != []
+            # ])
+            # +
+            # # discourage vehicels from waiting at nodes
+            # Sum([
+            #        (leave_node[i_index][j] - visit_node[i_index][j])
+            #     for i_index, i in enumerate(routes_plus_idle)
+            #     for j, _ in enumerate(i.nodes)
+            #     if j != 0 and j != len(i.nodes)
+            # ])
             # -
             # encourage delay between vehicles start
             # 1000*Sum([delayed_start[i] for i in range(len(routes_plus_idle))])
-            +
+            # +
             # encourage vehicle to be as fast as possible
             Sum([
                 visit_node[i_index][j]
                 for i_index, i in enumerate(routes_plus_idle)
                 for j, _ in enumerate(i.nodes)
+                # visit_node[i_index][len(i.nodes)-1]
+                # for i_index, i in enumerate(routes_plus_idle)
+
             ])
         )
     else:
@@ -227,7 +343,10 @@ def schedule(the_instance, current_routes):
         one_node_at_a_time +
         edges_direct +
         edges_inverse +
-        delayed_start
+        replanning_start_time + 
+        # delayed_start +
+        frozen_node_constraints +
+        frozen_edge_constraints
     )
 
     nodes_schedule = {}
