@@ -48,7 +48,7 @@ def _load_robot_vehicle_map():
         return {}
     return {str(k): str(v) for k, v in loaded.items()}
 
-def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=False):
+def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=False, recording=False):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
     CFG_FNAME = "mpc_fast_sim.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
@@ -83,7 +83,7 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     graph_path = os.path.join(data_dir, f"{EnvFolder}/graph.json")
 
     ## Load schedule of orignal problem
-    schedule_path = os.path.join(data_dir, "schedule.csv")
+    # schedule_path = os.path.join(data_dir, "schedule.csv")
     # start_path = os.path.join(data_dir, "robot_start.json")
 
     ## Load schedule of SingleRobot
@@ -97,7 +97,11 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     ## Load schedule of CoordScene1 & CoordScene2
     # schedule_path = os.path.join(data_dir, "schedule_CoordScene1.csv")
     # schedule_path = os.path.join(data_dir, "schedule_CoordScene2.csv")
-    start_path = os.path.join(data_dir, "robot_start_CoordScene2.json")
+    # start_path = os.path.join(data_dir, "robot_start_CoordScene2.json")
+
+    ## Load schedule of CoordScene1 & CoordScene2
+    schedule_path = os.path.join(data_dir, "schedule_CoordScene3.csv")
+    start_path = os.path.join(data_dir, "robot_start_CoordScene3.json")
 
     ## Open schedule
     with open(start_path, "r") as f:
@@ -114,10 +118,12 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
     ### Set up for coodinator
     coord = Coordinator.from_csv(schedule_path)
     coord.load_graph_from_json(graph_path)
+    coord.save_jobs(jobs_list)
+    coord.save_initial_route(routes)
 
     coord_shifted_targets = {}
     coord_shifted_targets_compensated = {}
-    coord_manipulated_nodes = {}
+    coord_handoff_planners = {}
 
     ### Set up robots
     robot_manager = RobotManager()
@@ -247,7 +253,22 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
 
             print(f'{rid} plan: {planner._ref_path}')
 
-            if rid in coord_shifted_targets_compensated:
+            if rid in coord_handoff_planners:
+                handoff_node = coord_handoff_planners[rid]
+
+                coord.update_target_nodes(
+                    rid, coord_handoff_planners[rid]
+                )
+
+                node_x, node_y = gpc.current_graph.get_node_coord(handoff_node)
+
+                dx = float(robot.state[0]) - node_x
+                dy = float(robot.state[1]) - node_y
+
+                if dx**2 + dy**2 < 0.40**2:
+                    coord.handoff_reached(rid)
+
+            elif rid in coord_shifted_targets_compensated:
                 print('sending pseudo node')
                 coord.update_target_nodes(
                     rid,
@@ -256,12 +277,67 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             else:
                 coord.update_target_nodes(rid, gpc.get_node_id(planner._current_target_node))
 
+            replacement = coord.take_ready_replan(rid)
+            if replacement:
+                new_planner = create_replanned_planner(config_mpc, config_robot, VERBOSE, gpc, rid, replacement)
+                robot_manager.set_planner(rid, new_planner)
+                planner = new_planner
+
+                coord.apply_replan_result(rid, replacement)
+                coord_handoff_planners.pop(rid, None)
+
+                ref_states, ref_speed, *_ = planner.get_local_ref(
+                    kt * config_mpc.ts,
+                    (
+                        float(robot.state[0]),
+                        float(robot.state[1]),
+                    ),
+                    idx_check_range=5,
+                    ignore_speed_ref=ignore_speed_ref,
+                )
+
+                coord.update_horizon(
+                    rid,
+                    ref_states,
+                )
+
+                print(f"\n\n[run_mpc] Installed replacement for {rid}: {replacement['routes'][rid]['nodes']}")
+
             # print(f'{rid}: {clash}')
             if kt > 2:
                 clash = coord.validate()
 
             # changing things based on validation from coordinator
             if clash and  rid in clash:
+                if clash[rid]['mode'] == "handoff":
+                    
+                    if rid not in coord_handoff_planners:
+                        handoff_planner = create_handoff_planner(config_mpc, config_robot, VERBOSE,
+                                                                gpc, robot.state, kt*config_mpc.ts,
+                                                                planner, clash[rid]["target_coord"])
+
+                        robot_manager.set_planner(rid, handoff_planner)
+                        planner = handoff_planner
+                        coord_handoff_planners[rid] = clash[rid]["target_coord"]
+
+                        ref_states, ref_speed, *_ = planner.get_local_ref(kt*config_mpc.ts,
+                                                                        (float(robot.state[0]), float(robot.state[1])),
+                                                                        idx_check_range=5,
+                                                                        ignore_speed_ref=ignore_speed_ref)
+
+                        coord.update_horizon(rid, ref_states)
+
+                    controller.set_current_state(robot.state)
+                    controller.set_ref_states(ref_states, ref_speed=ref_speed)
+                
+                    if naive_tracker:
+                        (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+                    else:
+                        (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
+                                                                    full_dyn_obstacle_list=None,
+                                                                    other_robot_states=other_robot_states,
+                                                                    map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+
                 if clash[rid]['mode'] == 'stopped':     # stopping from moving
                     print(f'Coordinator stopping {rid}')
                     actions = [np.array([0.0, 0.0])]
@@ -404,3 +480,97 @@ def create_new_planner(config_mpc, config_robot, VERBOSE, gpc, state, mpc_ts, ol
     )
 
     return crossing_planner
+
+
+def create_replanned_planner(config_mpc, config_robot, verbose, gpc, rid, replacement):
+    new_planner = LocalTrajPlanner(
+        config_mpc.ts,
+        config_mpc.N_hor,
+        config_robot.lin_vel_max,
+        verbose=verbose,
+    )
+
+    new_planner.load_map(
+        gpc.inflated_map.boundary_coords,
+        gpc.inflated_map.obstacle_coords_list,
+    )
+
+    replacement_schedule = replacement["solution"][rid]
+
+    path_coords = [
+        gpc.current_graph.get_node_coord(node_id)
+        for node_id, eta in replacement_schedule
+    ]
+
+    path_times = [
+        float(eta)
+        for node_id, eta in replacement_schedule
+    ]
+
+    new_planner.load_path(
+        path_coords,
+        path_times,
+        nomial_speed=config_robot.lin_vel_max,
+        method="linear",
+    )
+
+    return new_planner
+
+def create_handoff_planner(
+    config_mpc,
+    config_robot,
+    verbose,
+    gpc,
+    robot_state,
+    current_time,
+    old_planner,
+    handoff_node,
+):
+    handoff_planner = LocalTrajPlanner(
+        config_mpc.ts,
+        config_mpc.N_hor,
+        config_robot.lin_vel_max,
+        verbose=verbose,
+    )
+
+    handoff_planner.load_map(
+        gpc.inflated_map.boundary_coords,
+        gpc.inflated_map.obstacle_coords_list,
+    )
+
+    current_xy = (
+        float(robot_state[0]),
+        float(robot_state[1]),
+    )
+
+    handoff_xy = (
+        gpc.current_graph.get_node_coord(handoff_node)
+    )
+
+    current_target_index = (
+        old_planner._current_target_node_idx
+    )
+
+    handoff_eta = max(
+        float(
+            old_planner._ref_path_time[
+                current_target_index
+            ]
+        ),
+        current_time + old_planner.ts,
+    )
+
+    handoff_planner.load_path(
+        [
+            current_xy,
+            handoff_xy,
+        ],
+        [
+            current_time,
+            handoff_eta,
+        ],
+        nomial_speed=config_robot.lin_vel_max,
+        method="linear",
+    )
+
+    return handoff_planner

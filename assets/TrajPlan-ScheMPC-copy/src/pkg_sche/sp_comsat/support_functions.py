@@ -135,6 +135,58 @@ def json_parser(file_to_parse,monolithic = False):
         return jobs,nodes,edges,Autonomy,ATRs,charging_coefficient,\
                Big_number,hub_nodes
 
+def dict_parser(data):
+    Big_number = data['test_data']['Big_number']
+    hub_nodes = data['test_data']['hub_nodes']
+
+    Autonomy = data['test_data']['Autonomy']
+    charging_coefficient = data['test_data']['charging_coefficient']
+    nodes = data['test_data']['nodes']
+    jobs = data['jobs']
+    ATRs = data['ATRs']
+
+    start_list = []
+    for i in ATRs.values():
+        if i not in start_list:
+            start_list.append(i)
+
+    
+    jobs.update(
+        {
+            "start_{}".format(j): {
+                        "location": j,
+                        "precedence": [],
+                        "TW": [],
+                        "Service": 0,
+                        "ATR": [i for i,k in ATRs.items() if k == j]
+            }
+        for j in start_list
+        }
+    )
+    robots_with_end = {
+        rid for job_id, job_data in jobs.items()
+        if job_id.startswith("end_") for rid in job_data["ATR"]
+    }
+
+    for rid, start_node in ATRs.items():
+        if rid not in robots_with_end:
+            end_job_id = f"end_{start_node}"
+
+            if end_job_id in jobs:
+                jobs[end_job_id]["ATR"].append(rid)
+            else:
+                jobs[end_job_id] = {
+                    "location": start_node,
+                    "precedence": "None",
+                    "TW": [0, Big_number],
+                    "Service": 0,
+                    "ATR": [rid],
+                }
+    edges = {f"{i},{j}":[math.dist((node['x'],node['y']),
+                                   (nodes[j]['x'],nodes[j]['y'])),2] for i,node in nodes.items() for j in node['next']}
+
+    return jobs,nodes,edges,Autonomy,ATRs,charging_coefficient,Big_number,hub_nodes
+
 # I need this function to generate k paths to connect any two points of interest
 def k_shortest_paths(G, source, target, k, weight=None):
     return list(islice(nx.shortest_simple_paths(G, source, target, weight=weight), k))

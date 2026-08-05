@@ -11,6 +11,8 @@ import pandas as pd
 from itertools import combinations
 
 from basic_map.graph import NetGraph
+from pkg_sche.sp_comsat.Compo_slim import Compo_slim
+from coordinator.local_replanning import repair_robot_path
 
 VEHICLE_WIDTH = 0.2
 VEHICLE_MARGIN = 0.1
@@ -44,6 +46,7 @@ class Coordinator:
         }
 
         self.active_conflicts = {}
+        self._pending_replans = {}          # replans for scenario 3
 
         for rid in self._robot_ids:
             robot_schedule = self._total_schedule[self._total_schedule["robot_id"] == rid]
@@ -63,7 +66,28 @@ class Coordinator:
             self._remaining_nodes[rid].pop(0)
             self._remaining_schedule[rid].pop(0)
 
-            
+            self._routes = None
+            self._jobs_list = None
+            self._remaining_task_ids = None
+
+            # task tracking
+            self._current_job = {}
+
+            self.dummy_mode = True
+            self.dummy_data = None
+
+            if self.dummy_mode:
+                dummy_path = pathlib.Path(__file__).with_name(
+                    "dummy_data.json"
+                )
+
+                with dummy_path.open(
+                    "r",
+                    encoding="utf-8",
+                ) as read_file:
+                    self.dummy_data = json.load(read_file)
+                
+                # print(self.dummy_data)
 
 
     @classmethod
@@ -77,6 +101,39 @@ class Coordinator:
         self._graph = NetGraph.from_json(graph_path)
 
         self.add_target_coords()
+
+    def save_initial_route(self, routes):
+        self._routes = routes
+
+        if self.dummy_mode:
+            self._routes = self.dummy_data["initial_routes"]
+
+        print(f'[coord] Initial routes: {self._routes}')
+
+        self._remaining_task_ids = {
+            rid: list(route["tasks"]) for rid, route in self._routes.items()
+        }
+        for rid, tasks in self._remaining_task_ids.items():
+            if tasks and tasks[0].startswith("start_"):
+                tasks.pop(0)
+
+            self._current_job[rid] = {
+                "job_id": self._remaining_task_ids[rid][0],
+                "node": self._jobs_list[rid][tasks[0]]['location']
+            }
+
+        # print(f'[coord] Cuurent job: {self._current_job}')
+                
+        # print(f'[coord] remaining task ids: {self._remaining_task_ids}')
+
+    def save_jobs(self, jobs_list):
+        self._jobs_list = jobs_list
+
+        if self.dummy_mode:
+            self._jobs_list = self.dummy_data["jobs_list"]
+
+        # for rid in self._robot_ids:
+        #     print(f'[coord] Jobs for {rid}: {self._jobs_list[rid]}')
 
     def add_target_coords(self):
         for rid in self._remaining_nodes:
@@ -100,15 +157,45 @@ class Coordinator:
                     if robot_id in conflicts['crossing'] and target_node != node:
                         self.active_conflicts.pop(node)
                         
-                if self._remaining_nodes[robot_id] and self._remaining_nodes[robot_id][0] == self._current_target_node_ids[robot_id]:
+                if (self._remaining_nodes[robot_id] 
+                    and self._remaining_nodes[robot_id][0] 
+                        == self._current_target_node_ids[robot_id]):
+                    reached_node = self._current_target_node_ids[robot_id]
+                    
+                    # managing stored values on target change
                     self._remaining_nodes[robot_id].pop(0)
                     self._remaining_schedule[robot_id].pop(0)
                     self._prev_node_ids[robot_id] = self._current_target_node_ids[robot_id]
+
+                    # checking for job completetion
+                    if self._prev_node_ids[robot_id] == self._current_job[robot_id]["node"]:
+                        self.complete_job(robot_id)
+
+                    pending_replan = self._pending_replans.get(robot_id)
+
+                    if (pending_replan and pending_replan["status"] == "approaching_handoff"
+                        and reached_node == pending_replan["handoff_node"]):
+                        pending_replan["status"] = "at_handoff"
+                        pending_replan["handoff_time"] = self._ts
+
+                        print(f"\n\n[coord] {robot_id} reached replanning handoff "
+                                f"{reached_node} at {self._ts}"
+                            )
+
+                        pending_replan["replacement"] = repair_robot_path(
+                            robot_id, reached_node, pending_replan["blocked_edge"],
+                            self._ts, self._jobs_list, self._remaining_task_ids
+                        )
+
+                        pending_replan["status"] = "replacement_ready"
+
+                    # updating next node
                     if self._remaining_nodes[robot_id]:
                         self._next_node_ids[robot_id] = self._remaining_nodes[robot_id][0]
                     else:
                         self._next_node_ids[robot_id] = None
 
+                # updating new target node
                 self._current_target_node_ids[robot_id] = target_node
 
         else:
@@ -172,10 +259,63 @@ class Coordinator:
                     for rid in conflict['stopped']:
                         return_val[rid] = {'mode': 'stopped', 'target_coord': None}
 
+                    for rid in conflict["handoff"]:
+                        return_val[rid] = {"mode": "handoff", "target_coord": node}
+
                 else:
                     # next node to travel to after conflicting node [COORDINATOR SCENE 2]
                     for rid_1, rid_2 in combinations(rid_list, 2):
-                        if self._prev_node_ids[rid_1] == self._next_node_ids[rid_2]:
+                        if (self._prev_node_ids[rid_1] == self._next_node_ids[rid_2] 
+                            and 
+                            self._prev_node_ids[rid_2] == self._next_node_ids[rid_1]):
+                            # [COORDINATOR SCENE 3]
+                            print('[coord] Scene 3 replanning needed')
+                            # TODO: discuss what the correct policy to select which robot to replan is. 
+                            # currently just deciding to stop first robot and replan the second robot.
+                            replan_rid = rid_2
+                            wait_rid = rid_1
+                            handled_conflict2 = True
+
+                            # lazy reporting for now 
+                            # TODO: change this for better reporting later.
+                            return_val[wait_rid] = {'mode': 'stopped', 'target_coord': None}
+                            return_val[replan_rid] = {'mode': 'handoff', 'target_node': self._current_target_node_ids[replan_rid]}
+                            conflict_record = {
+                                'mode': 3,
+                                'replan': [replan_rid],
+                                'handoff': [replan_rid],
+                                'crossing': [],
+                                'stopped': [wait_rid],
+                                'shifted_target': None,
+                            }
+                            self.active_conflicts[node] = conflict_record
+                            self._pending_replans[replan_rid] = {
+                                "handoff_node": self._current_target_node_ids[replan_rid],
+                                "blocked_edge": (
+                                    self._current_target_node_ids[replan_rid],
+                                    self._next_node_ids[replan_rid],
+                                ),
+                                "stopped_robot": wait_rid,
+                                "status": "approaching_handoff",
+                                "replacement": None,
+                            }
+
+                            print(self._pending_replans)
+                            # frozen_schedules = self.frozen_schedule_builder(replan_rid)
+                            # print(f'[coord] Scene 3 stopped robot: {wait_rid}')
+                            # print(f'[coord] Total Schedule: {self._total_schedule}')
+                            # print(f'[coord] Frozen Schedules: {frozen_schedules}')
+
+                            # fff = repair_robot_path(replan_rid, self._curr_pose[replan_rid], 
+                            #                         self._prev_node_ids[replan_rid], self._current_target_node_ids[replan_rid],
+                            #                         self._graph,
+                            #                         node, self._ts, 
+                            #                         self._jobs_list, self._routes, self._remaining_task_ids,
+                            #                         frozen_schedules)
+
+                            # exit()
+
+                        elif self._prev_node_ids[rid_1] == self._next_node_ids[rid_2]:
                             print('[coord] Scene 2 conflict occuring 2-->1')
                             return_val, conflict_record = self.scene2_handle(rid_1, rid_2)
                             handled_conflict2 = True
@@ -304,13 +444,105 @@ class Coordinator:
                 new_target_coord = ((curr_target_coord[0] - 3 * VEHICLE_WIDTH), next_target_coord[1])
 
         return new_target_coord
+    
+    def frozen_schedule_builder(self, replan_rid):
+        frozen_schedules = {}
 
+        for rid in self._robot_ids:
+            if rid == replan_rid:
+                continue
+
+            frozen_schedules[rid] = {
+                'previous_node': self._prev_node_ids[rid],
+                'current_target_node': self._current_target_node_ids[rid],
+                'next_node': self._next_node_ids[rid],
+                'remaining_nodes': list(self._remaining_nodes[rid]),
+                'remaining_schedule': [{
+                    'node_id': node_id,
+                    'ETA': float(eta)
+                } for node_id, eta in self._remaining_schedule[rid]]
+            }
         
+        return frozen_schedules
 
+    def complete_job(self, rid):
+        if len(self._remaining_task_ids[rid]) > 1:
+           self._current_job[rid]["job_id"] = self._remaining_task_ids[rid][1]
+           self._current_job[rid]["node"] = self._jobs_list[rid][self._remaining_task_ids[rid][1]]['location']
+        else:
+            self._current_job[rid]["job_id"] = None
+            self._current_job[rid]["node"] = None
+
+        self._remaining_task_ids[rid].pop(0)
+
+    def handoff_reached(self, rid):
+        pending_replan = self._pending_replans.get(rid)
+
+        if(pending_replan and pending_replan["status"] == "approaching_handoff"):
+            self.update_target_nodes(rid, self._next_node_ids[rid])
+
+    def take_ready_replan(self, rid):
+        pending_replan = self._pending_replans.get(rid)
+
+        if (
+            pending_replan
+            and pending_replan["status"] == "replacement_ready"
+        ):
+            pending_replan["status"] = "installing"
+            return pending_replan["replacement"]
+
+        return None
+
+    def apply_replan_result(self, rid, replacement):
+        new_route = replacement["routes"][rid]
+        new_schedule = replacement["solution"][rid]
+        new_jobs = replacement["jobs_list"][rid]
+
+        self._routes[rid] = new_route
+        self._jobs_list[rid] = new_jobs
+
+        # The first node is the handoff node already reached by the robot.
+        self._prev_node_ids[rid] = new_route["nodes"][0]
+
+        self._remaining_nodes[rid] = list(
+            new_route["nodes"][1:]
+        )
+
+        self._remaining_schedule[rid] = [
+            (node_id, float(eta))
+            for node_id, eta in new_schedule[1:]
+        ]
+
+        self._remaining_task_ids[rid] = [
+            task_id
+            for task_id in new_route["tasks"]
+            if not task_id.startswith("start_")
+        ]
+
+        self._current_target_node_ids[rid] = (
+            self._remaining_nodes[rid][0]
+        )
+
+        if len(self._remaining_nodes[rid]) > 1:
+            self._next_node_ids[rid] = (
+                self._remaining_nodes[rid][1]
+            )
+        else:
+            self._next_node_ids[rid] = None
+
+        self._pending_replans[rid]["status"] = "clearing"
 
 
 # TODO:
-# 1. [DONE] add stopping prioirity based on ETA - if a robot is delayed, delay it more than making a different robot stop
-# 2. [DONE] add coord scene 2 code
-# 3. [DONE] fix tesing on current scene 1 basic scenario
+# 1. [DONE]coordinator scene 3 - position
+# 1. coordinator scene 3 - selection policy?
+# 2. coordinator scene 3 - setup: 
+#       [DONE]add loading from dummy_data.json 
+#       [DONE]send data to local_replanning.py 
+#       [DONE]build problem and correct data imports for replanning 
+#       [DONE]send problem to compo slim 
+#       [DONE]stop the not replanned robot and make the replan robot earch target
+#       integrate new path of robot and resume the stopped robot 
+#       ensure that mpc planner is doing correct work
+# 3. coordinator scene 3 - testing
 # 4. test scene 1 usage on the big demo

@@ -5,7 +5,7 @@ import networkx as nx
 
 from z3 import *
 # import matplotlib.pyplot as plt
-from .support_functions import json_parser, paths_formatter, print_graph
+from .support_functions import json_parser, paths_formatter, print_graph, dict_parser
 from .classes import Task, Instance, ATR
 # import math
 ###### The sub-problems algorithms #########
@@ -16,16 +16,20 @@ from .path_changer_Gurobi import changer
 from .route_checker_slim import routes_checking
 
 
-def Compo_slim(problem):
+def Compo_slim(problem, replanning_robot=None, current_time=0.0, frozen_schedules=None):
 
     print('COMPOSITIONAL ALGORITHM #### SLIM ####')
-    print('instance',problem)
+    # print('instance',problem)
 
     starting_time = tm()
 
     # first of all, let's parse the json file with the plant layout and the tasks info
-    jobs, nodes, edges, Autonomy, ATRs, charging_coefficient,Big_Number,hubs\
-        = json_parser(f'data/test_cases/{problem}.json')
+    if type(problem) == dict:
+        jobs, nodes, edges, Autonomy, ATRs, charging_coefficient,Big_Number,hubs\
+                = dict_parser(problem)
+    else:
+        jobs, nodes, edges, Autonomy, ATRs, charging_coefficient,Big_Number,hubs\
+                = json_parser(f'data/test_cases/{problem}.json')
     # now let's build the graph out of nodes and edges
     graph = nx.DiGraph()
 
@@ -132,7 +136,7 @@ def Compo_slim(problem):
             break
 
         schedule_start = tm()
-        schedule_feasibility, node_sequence, edge_sequence = schedule(The_Instance,current_routes)
+        schedule_feasibility, node_sequence, edge_sequence = schedule(The_Instance,current_routes, frozen_schedules, current_time)
         schedule_end = tm()
 
         ########### TEST #############
@@ -161,7 +165,7 @@ def Compo_slim(problem):
         paths_changing_feasibility = unknown
 
         # let's set a limit on the number of paths to try otherwise we'll get stuck in this loop
-        bound = 0
+        bound = 5
         counter = 0
         while paths_changing_feasibility != unsat and instance == unknown and counter < bound:
 
@@ -216,7 +220,7 @@ def Compo_slim(problem):
                     #     print(i.display())
 
                     sched_2_start = tm()
-                    schedule_feasibility, node_sequence, edge_sequence = schedule(The_Instance,current_routes)
+                    schedule_feasibility, node_sequence, edge_sequence = schedule(The_Instance,current_routes, frozen_schedules, current_time)
                     sched_2_end = tm()
 
                     #### TEST ###########
@@ -266,9 +270,27 @@ def Compo_slim(problem):
             i:[(value[0],float(value[1])) for key,value in node_sequence.items() if key[0] == i ]
             for i in ATRs
         }
+
+        # added for the coordinator
+        selected_routes = {             # stores the routes
+            route.vehicle.id: {
+                "tasks": [task.id for task in route.tasks],
+                "nodes": list(route.nodes),
+                "edges": [list(edge) for edge in route.edges]
+            } for route in current_routes
+        }
+
+        jobs_list = {                   # stores the data of jobs
+            route.vehicle.id: {
+                job_id: job_data 
+                        for job_id, job_data in jobs.items() if route.vehicle.id in job_data["ATR"] 
+                            and job_id in selected_routes[route.vehicle.id]["tasks"]
+            } for route in current_routes
+        }
+        # print(jobs_list['A1'])
+
     else:
         solution = {}
+        selected_routes = {}
 
-    return instance,optimum,running_time,len(previous_routes),paths_changed, solution
-
-
+    return instance,optimum,running_time,len(previous_routes),paths_changed, solution, selected_routes, jobs_list
