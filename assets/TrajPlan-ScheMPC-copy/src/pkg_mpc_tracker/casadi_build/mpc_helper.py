@@ -15,6 +15,16 @@ def dist_to_points_square(point: cs.SX, points: cs.SX) -> cs.SX:
     """
     return cs.sum1((point-points)**2) # sum1 is summing each column
 
+
+def wrap_angle(angle: cs.SX) -> cs.SX:
+    """Wrap an angle expression into [-pi, pi]."""
+    return cs.atan2(cs.sin(angle), cs.cos(angle))
+
+
+def angle_error(angle: cs.SX, reference: cs.SX) -> cs.SX:
+    """Return the shortest signed angular difference angle-reference."""
+    return wrap_angle(angle - reference)
+
 def dist_to_lineseg(point: cs.SX, line_segment: cs.SX) -> cs.SX:
     """Calculate the distance from a target point to a line segment.
 

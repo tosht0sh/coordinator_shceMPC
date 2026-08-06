@@ -19,7 +19,7 @@ class MocapPoseReceiverNode(DTROS):
         self._bind_ip = os.getenv("MOCAP_BIND_IP", "192.168.1.11") # Bot IP
         self._port = int(os.getenv("MOCAP_PORT", "22223"))
         self._stale_timeout = float(os.getenv("MOCAP_STALE_TIMEOUT", "0.5"))
-        self._source_ip = os.getenv("MOCAP_SOURCE_IP", "192.168.1.9").strip() or None # Laptop IP
+        self._source_ip = os.getenv("MOCAP_SOURCE_IP", "192.168.1.10").strip() or None # Laptop IP
 
         self._topic = f"/{self._vehicle_name}/mocap_reader"
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

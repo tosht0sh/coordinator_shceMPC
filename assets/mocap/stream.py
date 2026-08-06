@@ -13,7 +13,7 @@ from typing import Dict, Iterable, Tuple
 import qtm
 
 # Tosh Laptop
-TARGET_IP = "192.168.1.9"       # target on which qtm coords are sent to
+TARGET_IP = "192.168.1.10"       # target on which qtm coords are sent to
 
 # Kim Latop
 # TARGET_IP = "192.168.1.10"       # target on which qtm coords are sent to
@@ -97,7 +97,7 @@ def _yaw_from_rotation(rotation: object) -> float:
         raise ValueError(f"Expected 9 rotation-matrix values, got {len(values)}")
 
     # Assumes a standard 3x3 row-major rotation matrix for a Z-up world.
-    return math.atan2(values[3], values[0])
+    return math.atan2(-values[3], values[0])
 
 
 def _planar_pose(position, rotation, pos_scale: float):
@@ -108,6 +108,11 @@ def _planar_pose(position, rotation, pos_scale: float):
     """
     x = float(position.x) * pos_scale
     y = float(position.y) * pos_scale
+    #print("Rotation matrix: ",rotation[0])
+    # raw = getattr(rotation, "matrix", rotation)
+    # #print("Raw data ",raw[0])
+    # raw2 = math.atan2(-raw[3],raw[0])
+    # print("Raw all  ", raw2)
     theta = _yaw_from_rotation(rotation)
     return x, y, theta
 
@@ -119,7 +124,7 @@ async def main():
     pos_scale = 0.001
     send_hz = 30.0
     target = (TARGET_IP, 5005)
-    vehicles = ("duck1", "duck2", "duck3", "duck4")
+    vehicles = ("duck1", "duck2", "duck4", "duck6")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -137,6 +142,7 @@ async def main():
             await connection.load(QTM_FILE) # Load tqm file
             await connection.start(rtfromfile=True) # Start rtfromfile
 
+    
     # Get 6dof settings from qtm
     xml_string = await connection.get_parameters(parameters=["6d"])
     body_index = create_body_index(xml_string)

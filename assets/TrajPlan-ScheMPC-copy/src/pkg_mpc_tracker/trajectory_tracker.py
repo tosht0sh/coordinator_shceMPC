@@ -34,7 +34,15 @@ class Solver(Protocol): # this is not found in the .so file (in ternimal: nm -D 
 
     # Updated Solver class without opengen
     def run(self, p: list, initial_guess=None, initial_lagrange_multipliers=None, initial_penalty=None) -> Any: ...
-
+    # environment configs for UDP
+    #USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) # To run simulation with simulated data
+    # keep USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", False) if you want to use real data from
+    # the robot use USE_UDP_STATE = _env_bool("MPC_USE_UDP_STATE", True)
+    # or export MPC_USE_UDP_STATE=1
+    # UDP_BIND_IP = os.getenv("MPC_UDP_BIND_IP", "0.0.0.0")
+    # UDP_PORT = int(os.getenv("MPC_UDP_PORT", "5005"))
+    # UDP_STATE_TIMEOUT = float(os.getenv("MPC_UDP_STATE_TIMEOUT", "0.5"))
+    # DEFAULT_VEHICLE = os.getenv("MPC_DEFAULT_VEHICLE", "").strip() or None
 class DebugInfo(TypedDict):
     cost: float
     closest_obstacle_list: list[list[PathNode]]
@@ -102,6 +110,8 @@ class TrajectoryTracker:
         self._mode: str = 'none'
         self._map_loaded = False
         self._init_guess = [0.0]*self.nu*self.N_hor
+        self._last_measured_theta_wrapped: Optional[float] = None
+        self._last_measured_theta_continuous: Optional[float] = None
         self._obstacle_weights()
         self.set_work_mode(mode='safe', use_predefined_speed=True)
 
@@ -256,10 +266,14 @@ class TrajectoryTracker:
 
         if (not isinstance(current_state, np.ndarray)) or (not isinstance(goal_state, np.ndarray)):
             raise TypeError(f'State should be numpy.ndarry, got {type(current_state)}/{type(goal_state)}.')
-        self.state = current_state
-        self.final_goal = goal_state
+        state_continuous = np.array(current_state, dtype=float, copy=True)
+        state_continuous[2] = float(current_state[2])
+        self.state = state_continuous
+        self.final_goal = np.array(goal_state, dtype=float, copy=True)
+        self._last_measured_theta_wrapped = self.wrap_to_pi(float(current_state[2]))
+        self._last_measured_theta_continuous = float(state_continuous[2])
 
-        self.past_states: list[np.ndarray] = [current_state]
+        self.past_states: list[np.ndarray] = [state_continuous.copy()]
         self.past_actions: list[np.ndarray] = []
         self.cost_timelist: list[float] = []
         self.solver_time_timelist: list[float] = []
@@ -344,7 +358,18 @@ class TrajectoryTracker:
         """
         if not isinstance(current_state, np.ndarray):
             raise TypeError(f'State should be numpy.ndarry, got {type(current_state)}.')
-        self.state = current_state
+        state_continuous = np.array(current_state, dtype=float, copy=True)
+        measured_theta_wrapped = self.wrap_to_pi(float(state_continuous[2]))
+        if self._last_measured_theta_wrapped is None or self._last_measured_theta_continuous is None:
+            measured_theta_continuous = measured_theta_wrapped
+        else:
+            delta_theta = self.wrap_to_pi(measured_theta_wrapped - self._last_measured_theta_wrapped)
+            measured_theta_continuous = self._last_measured_theta_continuous + delta_theta
+
+        state_continuous[2] = measured_theta_continuous
+        self._last_measured_theta_wrapped = measured_theta_wrapped
+        self._last_measured_theta_continuous = measured_theta_continuous
+        self.state = state_continuous
 
     def set_ref_states(self, ref_states: np.ndarray, ref_speed:Optional[float]=None):
         """Set the local reference states for the coming time step.
@@ -373,7 +398,7 @@ class TrajectoryTracker:
         """
         if external_check:
             self.finishing = True
-            if np.allclose(self.state[:2], self.final_goal[:2], atol=0.5, rtol=0) and abs(self.past_actions[-1][0]) < 0.1:
+            if np.allclose(self.state[:2], self.final_goal[:2], atol=0.25, rtol=0) and abs(self.past_actions[-1][0]) < 0.05: #0.1 atol=0.5
                 self._idle = True
                 if self.vb:
                     print(f"[{self.__class__.__name__}-{self.robot_id}] Trajectory tracking finished.")
@@ -439,18 +464,19 @@ class TrajectoryTracker:
             other_robot_states = [-10] * (self.ns*(self.N_hor+1)*self.config.Nother)
 
         ### Get reference states ###
-        ref_states = self.ref_states.copy()
+        ref_states = self._unwrap_reference_states(self.ref_states.copy())
         finish_state = ref_states[-1,:]
         current_refs = ref_states.reshape(-1).tolist()
 
-        ### Get reference velocities ###
-        dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
-        if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
-            speed_ref = dist_to_goal / self.N_hor / self.ts * 2
-            speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
-            speed_ref_list = [speed_ref]*self.N_hor
-        else:
-            speed_ref_list = [self.base_speed]*self.N_hor
+        ### Get reference velocities ### 
+        ### Remove the if statement statement entirly to remove slow down before goal
+        # dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
+        # if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
+        #     speed_ref = dist_to_goal / self.N_hor / self.ts * 2
+        #     speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
+        #     speed_ref_list = [speed_ref]*self.N_hor
+        # else:
+        speed_ref_list = [self.base_speed]*self.N_hor
 
         last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
 
@@ -459,28 +485,33 @@ class TrajectoryTracker:
         current_ref_theta = math.degrees(ref_states[0, 2]) % 360
         current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
         current_theta = math.degrees(self.state[2]) % 360
-        theta_diff = self.angle_diff(current_ref_theta, current_theta)
-        theta_diff_last = self.angle_diff(current_ref_theta_last, current_theta)
+        theta_diff = float(self.angle_diff(current_ref_theta, current_theta))
+        theta_diff_last = float(self.angle_diff(current_ref_theta_last, current_theta))
         # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
         #     self.set_work_mode(mode='aligning')
         # elif theta_diff > 60:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
         
-        if theta_diff > 100: # and theta_diff_last > 90:
-            self.set_work_mode(mode='aligning')
-        else:
-            self.set_work_mode(mode='work', use_predefined_speed=False)
+        # if theta_diff > 100: # and theta_diff_last > 90:
+        #     self.set_work_mode(mode='aligning')
+        #     if not ignore_speed_ref:
+        #         # Large heading errors are better handled as an in-place alignment
+        #         # problem; asking for forward travel here tends to produce arcs/spins.
+        #         speed_ref_list = [0.0] * self.N_hor
+        # else:
+        #     self.set_work_mode(mode='work', use_predefined_speed=False)
 
         ### Check if turning around ###
-        mid_idx = 0
-        ref_theta_diff = self.angle_diff(current_ref_theta, current_ref_theta_last)
+        mid_idx = min(3, self.N_hor - 1)
+        ref_theta_diff = float(self.angle_diff(current_ref_theta, current_ref_theta_last))
         if (ref_theta_diff > 170):
             all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
             all_theta_diffs = self.angle_diff(all_ref_thetas, current_theta)
             try:
                 turn_idx = np.where(all_theta_diffs>170)[0][0]
             except IndexError:
+                print(f"mid_ixs {mid_idx}, turn_idx {turn_idx}")
                 turn_idx = self.N_hor - 1 # if no turn found, use the last index
             if turn_idx < mid_idx: # prioritize turning around
                 current_refs = np.vstack(( np.tile(ref_states[[turn_idx], :], (turn_idx+1, 1)), ref_states[turn_idx+1:, :] )).reshape(-1).tolist()
@@ -572,34 +603,10 @@ class TrajectoryTracker:
                 x_init = list(np.tile(state, N + 1))
                 # 2. Seed U: zeros is fine for inputs
                 u_init = [0.0] * (nu * N)
-                # 3. Seed Slacks: small positive value to help IPOPT interior point
-                # n_obs = self.config.Nstcobs + self.config.Ndynobs
-                # eps_init = [0.01] * (N * n_obs)
-                # eps_static_init = [1e-9] * (N * self.config.Nstcobs)
-                # eps_dynamic_init = [1e-9] * (N * self.config.Ndynobs)
+
                 initial_guess = x_init + u_init #+ eps_static_init + eps_dynamic_init
-            # --------------------------------
-            # rho_pen = 10.0
-            # p_eval = parameters + [rho_pen]
-            # # p used to be = parameters
-            # t0 = timer()
-            # sol = self._casadi_problem.solver(
-            #     x0=initial_guess,
-            #     p=p_eval,
-            #     lbx=self._casadi_problem.lbw,
-            #     ubx=self._casadi_problem.ubw,
-            #     lbg=self._casadi_problem.lbg,
-            #     ubg=self._casadi_problem.ubg,
-            # )
-            # solver_time = (timer() - t0) * 1000.0
 
-            # stats = self._casadi_problem.solver.stats()
-            # exit_status = str(stats.get("return_status", "UNKNOWN"))
-            # cost = float(sol["f"])
-
-            # w_opt = np.array(sol["x"]).reshape(-1).tolist()
-
-            # Added to test without slacks
+            initial_guess = self._rebranch_warm_start(initial_guess, state)
 
             rho = 10.0
             rho_factor = 5.0
@@ -641,19 +648,13 @@ class TrajectoryTracker:
                 iter_count = stats.get("iter_count", "NA")
                 x_size = self.ns * (self.N_hor + 1)
                 u_size = self.nu * self.N_hor
-                # eps_stc_size = self.N_hor * self.config.Nstcobs
-                # eps_dyn_size = self.N_hor * self.config.Ndynobs
-                # eps_stc_start = x_size + u_size
-                # eps_dyn_start = eps_stc_start + eps_stc_size
-                # eps_stc = w_opt[eps_stc_start:eps_stc_start + eps_stc_size]
-                # eps_dyn = w_opt[eps_dyn_start:eps_dyn_start + eps_dyn_size]
-                # max_eps_stc = max(eps_stc) if eps_stc else 0.0
-                # max_eps_dyn = max(eps_dyn) if eps_dyn else 0.0
+
                 max_abs_state = max(abs(v) for v in w_opt[:x_size]) if x_size > 0 else 0.0
                 max_abs_input = max(abs(v) for v in w_opt[x_size:x_size + u_size]) if u_size > 0 else 0.0
                 print(
                     f"[CasadiDebug-{self.robot_id}] status={exit_status}, iter={iter_count}, "
                     f"max|X|={max_abs_state:.4g}, max|U|={max_abs_input:.4g}, rho_pen={rho:.4g}"
+                    f"Cost: {cost}"
                     # f"max_eps_stc={max_eps_stc:.4g}, max_eps_dyn={max_eps_dyn:.4g}"
                 )
 
@@ -661,78 +662,11 @@ class TrajectoryTracker:
             u_size = self.nu * self.N_hor
             u = w_opt[x_size : x_size + u_size]
 
-            # Update the class initial guess for the NEXT step using your shift logic
-            # self._init_guess = CasadiNMPC.shift_warm_start(
-            #     w_opt,
-            #     ns=self.ns,
-            #     nu=self.nu,
-            #     N=self.N_hor,
-            #     n_stcobs=0, #self.config.Nstcobs,
-            #     n_dynobs=0, #self.config.Ndynobs,
-            # )
+
 
             self._init_guess = CasadiNMPC.shift_warm_start(
                 w_opt, ns=self.ns, nu=self.nu, N=self.N_hor
             )
-
-            # cas_solver = CasadiNMPC(self.config, self.robot_spec, parameters, self.next_initial_guess)
-            # u, cost, exit_status, solver_time, next_initial_guess = cas_solver.run()
-            # self.next_initial_guess = next_initial_guess
-            # if self._casadi_problem is None:
-            #     raise RuntimeError("Casadi solver is not built. Call load_motion_model(...) first.")
-
-            # if initial_guess is None or len(initial_guess) != len(self._casadi_problem.lbw):
-            #     initial_guess = [0.0] * len(self._casadi_problem.lbw)
-
-            # t0 = timer()
-            # sol = self._casadi_problem.solver(
-            #     x0=initial_guess,
-            #     p=parameters,
-            #     lbx=self._casadi_problem.lbw,
-            #     ubx=self._casadi_problem.ubw,
-            #     lbg=self._casadi_problem.lbg,
-            #     ubg=self._casadi_problem.ubg,
-            # )
-            # solver_time = (timer() - t0) * 1000.0
-
-            # stats = self._casadi_problem.solver.stats()
-            # exit_status = str(stats.get("return_status", "UNKNOWN"))
-            # cost = float(sol["f"])
-
-            # w_opt = np.array(sol["x"]).reshape(-1).tolist()
-
-            # # CasADi/IPOPT debug (solver status + slack magnitudes) for tuning.
-            # if self.vb:
-            #     iter_count = stats.get("iter_count", "NA")
-            #     x_size = self.ns * (self.N_hor + 1)
-            #     u_size = self.nu * self.N_hor
-            #     eps_stc_size = self.N_hor * self.config.Nstcobs
-            #     eps_dyn_size = self.N_hor * self.config.Ndynobs
-            #     eps_stc_start = x_size + u_size
-            #     eps_dyn_start = eps_stc_start + eps_stc_size
-            #     eps_stc = w_opt[eps_stc_start:eps_stc_start + eps_stc_size]
-            #     eps_dyn = w_opt[eps_dyn_start:eps_dyn_start + eps_dyn_size]
-            #     max_eps_stc = max(eps_stc) if eps_stc else 0.0
-            #     max_eps_dyn = max(eps_dyn) if eps_dyn else 0.0
-            #     print(
-            #         f"[CasadiDebug-{self.robot_id}] status={exit_status}, iter={iter_count}, "
-            #         f"max_eps_stc={max_eps_stc:.4g}, max_eps_dyn={max_eps_dyn:.4g}"
-            #     )
-
-            # x_size = self.ns * (self.N_hor + 1)
-            # u_size = self.nu * self.N_hor
-            # u = w_opt[x_size : x_size + u_size]
-
-            # # self._init_guess = w_opt
-            # self._init_guess = CasadiNMPC.shift_warm_start(
-            #                                             w_opt,
-            #                                             ns=self.ns,
-            #                                             nu=self.nu,
-            #                                             N=self.N_hor,
-            #                                             n_stcobs=self.config.Nstcobs,
-            #                                             n_dynobs=self.config.Ndynobs,
-            #                                         )
-
 
 
         else:
@@ -803,9 +737,48 @@ class TrajectoryTracker:
         
     @staticmethod
     def angle_diff(a, b):
-        diff = np.array(abs(a - b)) 
-        diff[diff > 180] = 360 - diff[diff > 180] # if the angle difference is larger than 180, use the other direction
+        diff = np.abs(np.asarray(a, dtype=float) - np.asarray(b, dtype=float))
+        diff = np.where(diff > 180.0, 360.0 - diff, diff)
+        if diff.ndim == 0:
+            return float(diff)
         return diff
+
+    @staticmethod
+    def wrap_to_pi(angle):
+        wrapped = (np.asarray(angle, dtype=float) + np.pi) % (2.0 * np.pi) - np.pi
+        if np.ndim(wrapped) == 0:
+            return float(wrapped)
+        return wrapped
+
+    def _unwrap_reference_states(self, ref_states: np.ndarray) -> np.ndarray:
+        if ref_states.shape[0] == 0:
+            return ref_states
+
+        ref_states = np.array(ref_states, dtype=float, copy=True)
+        ref_states[0, 2] = self.state[2] + self.wrap_to_pi(ref_states[0, 2] - self.state[2])
+        for idx in range(1, ref_states.shape[0]):
+            ref_states[idx, 2] = ref_states[idx - 1, 2] + self.wrap_to_pi(ref_states[idx, 2] - ref_states[idx - 1, 2])
+        return ref_states
+
+    def _rebranch_warm_start(self, initial_guess: list[float], state: np.ndarray) -> list[float]:
+        if self._casadi_problem is None or len(initial_guess) != len(self._casadi_problem.lbw):
+            return initial_guess
+
+        rebranched = list(initial_guess)
+        x_size = self.ns * (self.N_hor + 1)
+        if x_size == 0:
+            return rebranched
+
+        rebranched[:self.ns] = list(np.asarray(state, dtype=float))
+        theta_anchor = float(state[2])
+        for step in range(self.N_hor + 1):
+            theta_idx = step * self.ns + 2
+            if theta_idx >= x_size:
+                break
+            theta_value = rebranched[theta_idx]
+            rebranched[theta_idx] = theta_anchor + self.wrap_to_pi(theta_value - theta_anchor)
+            theta_anchor = rebranched[theta_idx]
+        return rebranched
 
     @staticmethod
     def lineseg_dists(points: np.ndarray, line_points_1: np.ndarray, line_points_2: np.ndarray) -> np.ndarray:

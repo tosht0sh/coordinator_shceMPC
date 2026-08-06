@@ -2,8 +2,8 @@
 ts: 0.2   # Size of the time-step (sampling time)
 
 ### Robot Specification (physical shape)
-vehicle_width:  0.2  # Vehicle width in meters
-vehicle_margin: 0.1  # Vehicle extra safe margin
+vehicle_width:  0.15  # Vehicle width in meters
+vehicle_margin: 0.0  # Vehicle extra safe margin
 social_margin: 0.0   # Vehicle extra social margin for soft loss terms
 
 ### Robot Specification (kinematic parameters) 
@@ -14,6 +14,31 @@ social_margin: 0.0   # Vehicle extra social margin for soft loss terms
 # lin_acc_max: 0.20       # Vehicle contraint on the maximal linear acceleration
 # ang_vel_max: 0.75  # Vehicle contraint on the maximal angular velocity
 # ang_acc_max: 3.0   # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
+
+### DUCK 1 ###
+# lin_vel_min: -0.4 #Vehicle contraint on the minimal velocity possible
+# lin_vel_max: 0.40    # Vehicle contraint on the maximal velocity possible
+# lin_acc_min: -2.0 #-0.60   # Vehicle contraint on the maximal linear retardation
+# lin_acc_max: 2.0 #0.60       # Vehicle contraint on the maximal linear acceleration
+# ang_vel_max: 4.0 #1.5  # Vehicle contraint on the maximal angular velocity
+# ang_acc_max: 8.0 #3.0   # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
+
+### DUCK 2 ###
+lin_vel_min: -0.10 #0.50 #Vehicle contraint on the minimal velocity possible
+lin_vel_max: 0.3 #0.20   # Vehicle contraint on the maximal velocity possible
+lin_acc_min: -1.5 #-0.60   # Vehicle contraint on the maximal linear retardation
+lin_acc_max: 3.5 #1.5 #0.60       # Vehicle contraint on the maximal linear acceleration
+ang_vel_max: 3.0 #2.5  # Vehicle contraint on the maximal angular velocity
+ang_acc_max: 4.5 #3.0   # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
+
+
+### Worked OK for duck 4,6 but not for duck1. Too weak ###
+# lin_vel_min: -0.10 #0.50 #Vehicle contraint on the minimal velocity possible
+# lin_vel_max: 0.2 #0.50   # Vehicle contraint on the maximal velocity possible
+# lin_acc_min: -1.5 #-0.60   # Vehicle contraint on the maximal linear retardation
+# lin_acc_max: 1.5 #0.60       # Vehicle contraint on the maximal linear acceleration
+# ang_vel_max: 2.5 #1.5  # Vehicle contraint on the maximal angular velocity
+# ang_acc_max: 3.0 #3.0   # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
 
 
 ### Use this for simulation.

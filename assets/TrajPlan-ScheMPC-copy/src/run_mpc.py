@@ -54,7 +54,7 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
     CFG_FNAME = "mpc_fast_sim.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
     MAP_ONLY = True
     AUTORUN = True # if false, press key (in the plot window) to continue
-    MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
+    MONITOR_COST = True # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = True
     TIMEOUT = 10000
     
@@ -89,6 +89,9 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
     ## Load schedule of SingleRobot
     # schedule_path = os.path.join(data_dir, "schedule_SingleRobot.csv")
     # start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
+
+    schedule_path = os.path.join(data_dir, "schedule_MultiRobots.csv")
+    start_path = os.path.join(data_dir, "robot_start_MultiRobots.json")
 
     ## Load schedule of TwoRobots
     # schedule_path = os.path.join(data_dir, "schedule_TwoRobots.csv")
