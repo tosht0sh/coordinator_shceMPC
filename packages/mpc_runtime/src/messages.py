@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional, Union
 
 
 JsonDict = Dict[str, Any]
-PacketType = Union["MapPacket", "SchedulePacket", "TelemetryPacket", "StatusPacket", "NeighborStatesPacket"]
+PacketType = Union["MapPacket", "SchedulePacket", "TelemetryPacket", "StatusPacket",
+                    "NeighborStatesPacket", "CoordinatorModePacket"]
 
 
 
@@ -170,6 +171,25 @@ class StatusPacket:
             schedule_id=str(payload.get("schedule_id", "schedule-default")),
         )
 
+@dataclass
+class CoordinatorModePacket:
+    robot_id: str
+    mode: str
+    sequence: int
+    sent_at: float
+    kind: str = field(init=False, default="coordinator_mode")
+
+    def to_payload(self) -> JsonDict:
+        return asdict(self)
+
+    @classmethod
+    def from_payload(cls, payload: JsonDict) -> "CoordinatorModePacket":
+        return cls(
+            robot_id=str(payload["robot_id"]),
+            mode=str(payload["mode"]),
+            sequence=int(payload.get("sequence", 0)),
+            sent_at=float(payload.get("sent_at", 0.0)),
+        )
 
 
 def packet_from_payload(payload: JsonDict) -> PacketType:
@@ -184,6 +204,8 @@ def packet_from_payload(payload: JsonDict) -> PacketType:
         return NeighborStatesPacket.from_payload(payload)
     if kind == "status":
         return StatusPacket.from_payload(payload)
+    if kind == "coordinator_mode":
+        return CoordinatorModePacket.from_payload(payload)
     raise ValueError(f"Unsupported packet kind: {kind}")
 
 

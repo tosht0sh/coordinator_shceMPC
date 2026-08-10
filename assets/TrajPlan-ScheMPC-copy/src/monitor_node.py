@@ -37,10 +37,12 @@ for path in (TRAJPLAN_SRC, MPC_RUNTIME_SRC):
 
 from basic_motion_model.motion_model import UnicycleModel
 from configs import CircularRobotSpecification, MpcConfiguration
-from messages import NeighborStatesPacket, TelemetryPacket, packet_from_json, packet_to_wire
+from messages import NeighborStatesPacket, TelemetryPacket, CoordinatorModePacket, packet_from_json, packet_to_wire
 from pkg_motion_plan.global_path_coordinate import GlobalPathCoordinator
 from visualizer.mpc_plot import MpcPlotInLoop
 from visualizer.object import CircularVehicleVisualizer
+
+from coordinator.coordinator import Coordinator
 
 
 DATA_NAME = os.getenv("MPC_DATA_NAME", "schedule_demo2_data")
@@ -56,6 +58,8 @@ MAP_ONLY = os.getenv("MPC_MONITOR_MAP_ONLY", "1").strip().lower() in {"1", "true
 SHADOW_SIM = False #os.getenv("MPC_SHADOW_SIM", "1").strip().lower() in {"1", "true", "yes", "on"}
 OUTPUT_CSV = os.getenv("MPC_MONITOR_ACTUAL_CSV", "Actual_monitor.csv")
 IDLE_TIMEOUT = float(os.getenv("MPC_MONITOR_IDLE_TIMEOUT", "0.1"))
+
+COORDINATOR_PORT = int(os.getenv("COORDINATOR_PORT", "5010"))
 
 
 def _load_endpoint_map() -> Dict[str, Tuple[str, int]]:
@@ -180,6 +184,24 @@ class MonitorNode:
         self.sock.setblocking(False)
         self.peer_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if self.neighbor_relay_enabled else None
 
+        self.coord = Coordinator.from_csv(str(schedule_path))
+        self.coord_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.coord.load_graph_from_json(str(graph_path))
+
+        self.coord_shifted_targets = {}
+        self.coord_shifted_targets_compensated = {}
+        self.coord_handoff_planners = {}
+
+        self.coord_sequence = 0
+
+        # TODO: solve this, neeeded for coord scene 3
+        # self.coord.save_jobs(jobs_list)
+        # self.coord.save_initial_route(routes)
+
+        self.coord_modes = {
+            rid: "WAIT" for rid in self.robot_ids
+        }
+
         print(f"[Monitor] Listening for telemetry on {TELEMETRY_BIND_IP}:{TELEMETRY_PORT}")
         if self.neighbor_relay_enabled:
             print(f"[Monitor] Relaying neighbor trajectories to bots on UDP port {NEIGHBOR_PORT}")
@@ -297,6 +319,8 @@ class MonitorNode:
         current_refs = np.asarray(packet.current_refs, dtype=float) if packet.current_refs else np.empty((0, 3))
         cost = 0.0 if packet.cost is None else float(packet.cost)
 
+        target_node_id = None
+
         self.plotter.update_plot(rid, packet.t, action, pose, cost, pred_states, current_refs)
         self.visualizers[rid].update(*pose)
         self.latest_packet[rid] = packet
@@ -309,6 +333,15 @@ class MonitorNode:
                 history.append((packet.t, node_id))
             else:
                 history[-1] = (packet.t, node_id)
+
+            target_coord = tuple(packet.current_target_node)
+            target_node_id = self.gpc.get_node_id(target_coord)
+
+        self.coord.update_horizon(rid, self._prediction_from_packet(packet))
+        self.coord.update_curr_pose(rid, pose)
+
+        if target_node_id is not None:
+            self.coord.update_target_nodes(rid, target_node_id)
 
         if SHADOW_SIM:
             shadow_state = self.shadow_states[rid]
@@ -340,12 +373,62 @@ class MonitorNode:
         df.to_csv(output_path, index=False)
         print(f"Saved monitored schedule to {output_path}")
 
+    def _run_coordinator(self) -> None:
+        if not all(rid in self.last_packet_time for rid in self.robot_ids):
+            return
+
+        coord_time = max(packet.t for packet in self.latest_packet.values())
+        self.coord.update_time(coord_time)
+
+        decisions = self.coord.validate() or {}
+
+        # TODO: this does not seem to be correct, change maybe?
+        requested_modes = {rid: "WORK" for rid in self.robot_ids}
+
+        # change mode to WAIT for the robot wherever needed
+        for source_rid, decicsion in decisions.items():
+            rid = str(source_rid)
+
+            if decicsion["mode"] == "stopped":
+                requested_modes[rid] = "WAIT"
+            else:
+                requested_modes[rid] = "WORK"
+
+        self._send_coordinator_modes(requested_modes)
+
+    def _send_coordinator_modes(self, requested_modes) -> None:
+        if self.coord_sock is None:
+            return
+
+        for rid, mode in requested_modes.items():
+            endpoint = self.endpoint_map.get(rid)
+
+            if endpoint is None:
+                if rid not in self._relay_warned_missing_endpoint:
+                    print(f"[Monitor] No coordinator endpoint for {rid}. Mode command skipped")
+
+                    self._relay_warned_missing_endpoint.add(rid)
+                continue
+
+            host, _ = endpoint
+
+            packet = CoordinatorModePacket(robot_id = rid,
+                        mode = mode,
+                        sequence=self.coord_sequence,
+                        sent_at = time.time()
+                    )
+
+            self.coord_sock.sendto(packet_to_wire(packet), (host, COORDINATOR_PORT))
+
+        self.coord_sequence += 1
+
     def run(self) -> None:
         self.plotter.show()
         last_plot_time = 0.0
         try:
             while True:
                 self._poll_packets()
+                self._run_coordinator()
                 now = time.monotonic()
                 if now - last_plot_time >= max(IDLE_TIMEOUT, self.config_mpc.ts):
                     latest_t = 0.0
@@ -359,6 +442,7 @@ class MonitorNode:
             self._save_actual_schedule()
             self.plotter.close()
             self.sock.close()
+            self.coord_sock.close()
             if self.peer_sock is not None:
                 self.peer_sock.close()
 

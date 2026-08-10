@@ -30,6 +30,7 @@ try:
     from .PI_control_motors import PI
     from ._repo_paths import TRAJPLAN_CONFIG
     from .messages import (
+        CoordinatorModePacket,
         MapPacket,
         NeighborStatesPacket,
         SchedulePacket,
@@ -43,6 +44,7 @@ except ImportError:
     from PI_control_motors import PI
     from _repo_paths import TRAJPLAN_CONFIG
     from messages import (
+        CoordinatorModePacket,
         MapPacket,
         NeighborStatesPacket,
         SchedulePacket,
@@ -73,6 +75,11 @@ BOT_SCHEDULE_LISTENER_PORT = 5007
 LAPTOP_TELEMETRY_IP = "192.168.1.10" # Tosh ip
 # LAPTOP_TELEMETRY_IP = "192.168.1.10" # Kim ip
 LAPTOP_TELEMETRY_PORT = 5008
+
+# Coordinator: bot receives WAIT/WORK commands from the laptop.
+COORDINATOR_BIND_IP = os.getenv("MPC_COORDINATOR_BIND_IP", "0.0.0.0")
+COORDINATOR_PORT = int(os.getenv("MPC_COORDINATOR_PORT", "5010"))
+COORDINATOR_TIMEOUT = float(os.getenv("MPC_COORDINATOR_TIMEOUT", "1.0"))
 
 
 # # Neighbor trajectories: bot listens for neighbor-state packets from laptop
@@ -154,6 +161,12 @@ class BotMpcNode(DTROS):
         self._server = self._create_schedule_server()
         self._telemetry_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._neighbor_sock = self._create_neighbor_socket()
+        self._coordinator_sock = self._create_coordinator_socket()
+
+        # Fail safe: motion is disabled until a fresh WORK command is received.
+        self.coord_mode = "WAIT"
+        self._last_coordinator_rx_time: Optional[float] = None
+        self._last_coordinator_sequence = -1
 
         self.loginfo(f"Listening for schedule updates on {BOT_SCHEDULE_LISTEN_IP}:{BOT_SCHEDULE_LISTENER_PORT}")
         self.loginfo(f"Reading pose from {self.pose_topic} (timeout={self.pose_timeout:.2f}s)")
@@ -162,6 +175,10 @@ class BotMpcNode(DTROS):
             f"(timeout={self.neighbor_timeout:.2f}s)"
         )
         self.loginfo(f"Sending telemetry to {LAPTOP_TELEMETRY_IP}:{LAPTOP_TELEMETRY_PORT }")
+        self.loginfo(
+            f"Listening for coordinator commands on {COORDINATOR_BIND_IP}:{COORDINATOR_PORT} "
+            f"(timeout={COORDINATOR_TIMEOUT:.2f}s)"
+        )
 
 
     def _create_schedule_server(self) -> socket.socket:
@@ -176,6 +193,13 @@ class BotMpcNode(DTROS):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((BOT_NEIGHBOUR_LISTEN_IP, BOT_NEIGHBOUR_LISTEN_PORT))
+        sock.setblocking(False)
+        return sock
+
+    def _create_coordinator_socket(self) -> socket.socket:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((COORDINATOR_BIND_IP, COORDINATOR_PORT))
         sock.setblocking(False)
         return sock
 
@@ -358,6 +382,54 @@ class BotMpcNode(DTROS):
                 return
             self._handle_neighbor_packet(packet, sender)
 
+    def _handle_coordinator_packet(self, raw_packet: bytes, sender: tuple[str, int]) -> None:
+        try:
+            packet = packet_from_json(raw_packet.decode("utf-8").strip())
+        except Exception as exc:
+            rospy.logwarn_throttle(
+                2.0,
+                "Invalid coordinator packet from %s:%s: %s",
+                sender[0],
+                sender[1],
+                exc,
+            )
+            return
+
+        if not isinstance(packet, CoordinatorModePacket):
+            return
+
+        if packet.robot_id not in {self._logical_robot_id, self.vehicle_name}:
+            return
+
+        mode = packet.mode.strip().upper()
+        if mode not in {"WAIT", "WORK"}:
+            rospy.logwarn_throttle(2.0, "Unsupported coordinator mode: %s", packet.mode)
+            return
+
+        if packet.sequence < self._last_coordinator_sequence:
+            return
+
+        self._last_coordinator_sequence = packet.sequence
+        self._last_coordinator_rx_time = rospy.get_time()
+        self.coord_mode = mode
+        rospy.loginfo_throttle(
+            1.0,
+            "Coordinator mode for %s: %s",
+            self._logical_robot_id,
+            self.coord_mode,
+        )
+
+    def _poll_coordinator_socket(self, max_packets: int = 32) -> None:
+        for _ in range(max_packets):
+            try:
+                packet, sender = self._coordinator_sock.recvfrom(65535)
+            except BlockingIOError:
+                return
+            except OSError as exc:
+                rospy.logwarn_throttle(2.0, "Coordinator UDP receive failed: %s", exc)
+                return
+            self._handle_coordinator_packet(packet, sender)
+
     def _clip_action(self, action: np.ndarray) -> np.ndarray:
         clipped = np.asarray(action, dtype=float).copy()
         clipped[0] = np.clip(clipped[0], self.config_robot.lin_vel_min, self.config_robot.lin_vel_max)
@@ -380,7 +452,15 @@ class BotMpcNode(DTROS):
         # else:
         #     rospy.loginfo_throttle(2.0, "Wheel PI waiting for valid encoder updates; publishing raw MPC command.")
 
+        coordinator_stale = (
+            self._last_coordinator_rx_time is None
+            or rospy.get_time() - self._last_coordinator_rx_time > COORDINATOR_TIMEOUT
+        )
+        if self.coord_mode == "WAIT" or coordinator_stale:
+            published_action = np.zeros(2, dtype=float)
+
         msg = Twist2DStamped(v=float(published_action[0]), omega=float(published_action[1]))
+
         self.cmd_pub.publish(msg)
         self._last_action = published_action
 
@@ -431,6 +511,7 @@ class BotMpcNode(DTROS):
         while not rospy.is_shutdown():
             self._poll_schedule_socket()
             self._poll_neighbor_socket()
+            self._poll_coordinator_socket()
 
             if not self._schedule_loaded or self._latest_pose is None:
                 rate.sleep()
@@ -490,6 +571,7 @@ class BotMpcNode(DTROS):
         if self._server is not None:
             self._server.close()
         self._neighbor_sock.close()
+        self._coordinator_sock.close()
         self._telemetry_sock.close()
 
 
