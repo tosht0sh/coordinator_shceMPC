@@ -48,8 +48,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
 
 if __name__ == "__main__":
     # problem = '4Small_cs1' # SAFETY COEFF 20
-    # problem = '4Small_cs2' # SAFETY COEFF 20
-    problem = '4Small_cs3' # SAFETY COEFF 20
+    problem = '4Small_cs2' # SAFETY COEFF 20
+    # problem = '4Small_cs3' # SAFETY COEFF 20
     # problem = "10Large"
 
     general_funct(

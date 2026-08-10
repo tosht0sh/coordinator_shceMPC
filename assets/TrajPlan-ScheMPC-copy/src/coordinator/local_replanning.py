@@ -73,7 +73,6 @@ def problem_builder(rid, handoff_node, blocked_edge, jobs_list, remaining_jobs):
                 "N20":{"x":5,"y":1,"next":["N10", "N21"]},
                 "N21":{"x":5,"y":3,"next":["N20", "N11", "N22"]},
                 "N22":{"x":5,"y":5,"next":["N21", "N12"]},
-                # "N99":{"x":pose[0],"y":pose[1],"next":[next_node, prev_node]},
             },
             "hub_nodes": []
         },

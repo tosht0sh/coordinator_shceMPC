@@ -511,7 +511,7 @@ class TrajectoryTracker:
             try:
                 turn_idx = np.where(all_theta_diffs>170)[0][0]
             except IndexError:
-                print(f"mid_ixs {mid_idx}, turn_idx {turn_idx}")
+                # print(f"mid_ixs {mid_idx}, turn_idx {turn_idx}")
                 turn_idx = self.N_hor - 1 # if no turn found, use the last index
             if turn_idx < mid_idx: # prioritize turning around
                 current_refs = np.vstack(( np.tile(ref_states[[turn_idx], :], (turn_idx+1, 1)), ref_states[turn_idx+1:, :] )).reshape(-1).tolist()

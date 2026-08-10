@@ -54,7 +54,7 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
     CFG_FNAME = "mpc_fast_sim.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
     MAP_ONLY = True
     AUTORUN = True # if false, press key (in the plot window) to continue
-    MONITOR_COST = True # if true, monitor the cost (this will slow down the simulation)
+    MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = True
     TIMEOUT = 10000
     
@@ -83,28 +83,30 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
     graph_path = os.path.join(data_dir, f"{EnvFolder}/graph.json")
 
     ## Load schedule of orignal problem
-    # schedule_path = os.path.join(data_dir, "schedule.csv")
+    schedule_path = os.path.join(data_dir, "schedule.csv")
     # start_path = os.path.join(data_dir, "robot_start.json")
 
+    #### PHYSICAL ROBOT SCHEDULES
     ## Load schedule of SingleRobot
     # schedule_path = os.path.join(data_dir, "schedule_SingleRobot.csv")
     # start_path = os.path.join(data_dir, "robot_start_SingleRobot.json")
 
-    schedule_path = os.path.join(data_dir, "schedule_MultiRobots.csv")
-    start_path = os.path.join(data_dir, "robot_start_MultiRobots.json")
+    # schedule_path = os.path.join(data_dir, "schedule_MultiRobots.csv")
+    # start_path = os.path.join(data_dir, "robot_start_MultiRobots.json")
 
     ## Load schedule of TwoRobots
     # schedule_path = os.path.join(data_dir, "schedule_TwoRobots.csv")
     # start_path = os.path.join(data_dir, "robot_start_TwoRobots.json")
 
+    #### SIMULATION SCHEDULES
     ## Load schedule of CoordScene1 & CoordScene2
     # schedule_path = os.path.join(data_dir, "schedule_CoordScene1.csv")
-    # schedule_path = os.path.join(data_dir, "schedule_CoordScene2.csv")
-    # start_path = os.path.join(data_dir, "robot_start_CoordScene2.json")
+    schedule_path = os.path.join(data_dir, "schedule_CoordScene2.csv")
+    start_path = os.path.join(data_dir, "robot_start_CoordScene2.json")
 
-    ## Load schedule of CoordScene1 & CoordScene2
-    schedule_path = os.path.join(data_dir, "schedule_CoordScene3.csv")
-    start_path = os.path.join(data_dir, "robot_start_CoordScene3.json")
+    ## Load schedule of CoordScene3
+    # schedule_path = os.path.join(data_dir, "schedule_CoordScene3.csv")
+    # start_path = os.path.join(data_dir, "robot_start_CoordScene3.json")
 
     ## Open schedule
     with open(start_path, "r") as f:
@@ -223,7 +225,7 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
 
                 if rid in coord_shifted_targets_compensated.keys():
                     if coord_shifted_targets_compensated[rid]['new_target'] == coord_shifted_targets[rid]:
-                        print('Already compensated for this change')
+                        print('[run_mpc] Already compensated for this change')
                     else:
                         new_plan = create_new_planner(config_mpc, config_robot, VERBOSE, gpc, robot.state, kt * config_mpc.ts, planner, coord_shifted_targets[rid])
                         robot_manager.set_planner(rid, new_plan)
@@ -254,7 +256,7 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
             # print(coord_shifted_targets_compensated)
             # print(coord_shifted_targets)
 
-            print(f'{rid} plan: {planner._ref_path}')
+            print(f'[run_mpc] {rid} plan: {planner._ref_path}')
 
             if rid in coord_handoff_planners:
                 handoff_node = coord_handoff_planners[rid]
@@ -272,7 +274,7 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
                     coord.handoff_reached(rid)
 
             elif rid in coord_shifted_targets_compensated:
-                print('sending pseudo node')
+                print('[run_mpc] sending pseudo node')
                 coord.update_target_nodes(
                     rid,
                     coord_shifted_targets_compensated[rid]['parent_node'],
@@ -342,14 +344,14 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
                                                                     map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
 
                 if clash[rid]['mode'] == 'stopped':     # stopping from moving
-                    print(f'Coordinator stopping {rid}')
+                    print(f'[run_mpc]  Coordinator stopping {rid}')
                     actions = [np.array([0.0, 0.0])]
                     pred_states = np.array([robot.state.copy()] * config_mpc.N_hor)
                     current_refs = ref_states
                     debug_info = {"cost": 0.0, "step_runtime": 0.0, "monitored_cost": None}
 
                 if clash[rid]['mode'] == 'crossing':    # moving towards shifted target
-                    print(f'{rid} crossing node with shifterd target coords ')
+                    print(f'[run_mpc]  {rid} crossing node with shifterd target coords ')
 
                     if rid not in coord_shifted_targets.keys():     # adding to dict to maintain tracking
                         coord_shifted_targets.update({rid: clash[rid]['target_coord']})
@@ -381,6 +383,7 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
                                                                 map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
         
             # reporting [was here previously]
+            # if debug_info['monitored_cost'] is not None:
             controller.report_cost(debug_info['cost'],
                                     debug_info['step_runtime'],
                                     debug_info['monitored_cost'],

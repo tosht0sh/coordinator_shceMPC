@@ -190,8 +190,8 @@ class Coordinator:
                         pending_replan["status"] = "replacement_ready"
 
                     # updating next node
-                    if self._remaining_nodes[robot_id]:
-                        self._next_node_ids[robot_id] = self._remaining_nodes[robot_id][0]
+                    if len(self._remaining_nodes[robot_id]) > 1:
+                        self._next_node_ids[robot_id] = self._remaining_nodes[robot_id][1]
                     else:
                         self._next_node_ids[robot_id] = None
 
@@ -236,6 +236,8 @@ class Coordinator:
     def validate(self):
         """ Validates current path of robots to avoid deadlock scenarios """
         # print(f'\n[coord] schedule list:{self._remaining_schedule}')
+        print(f'\n[coord] current target node:{self._current_target_node_ids}')
+        print(f'\n[coord] next node:{self._next_node_ids}')
 
         # check if robots are heading towards the same node [COORDINATOR SCENE 1]
         target_node_list = set(self._current_target_node_ids.values())
@@ -259,8 +261,9 @@ class Coordinator:
                     for rid in conflict['stopped']:
                         return_val[rid] = {'mode': 'stopped', 'target_coord': None}
 
-                    for rid in conflict["handoff"]:
-                        return_val[rid] = {"mode": "handoff", "target_coord": node}
+                    if conflict["mode"] ==3:
+                        for rid in conflict["handoff"]:
+                            return_val[rid] = {"mode": "handoff", "target_coord": node}
 
                 else:
                     # next node to travel to after conflicting node [COORDINATOR SCENE 2]
