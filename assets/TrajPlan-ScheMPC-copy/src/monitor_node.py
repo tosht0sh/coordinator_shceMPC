@@ -94,6 +94,9 @@ def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path,
         "SingleRobot": ("schedule_SingleRobot.csv", "robot_start_SingleRobot.json"),
         "TwoRobots": ("schedule_TwoRobots.csv", "robot_start_TwoRobots.json"),
         "MultiRobot": ("schedule_MultiRobots.csv", "robot_start_MultiRobots.json"),
+        "CoordScene1": ("schedule_CoordScene1.csv", "robot_start_CoordScene1.json"),
+        "CoordScene2": ("schedule_CoordScene2.csv", "robot_start_CoordScene2.json"),
+        "CoordScene3": ("schedule_CoordScene3.csv", "robot_start_CoordScene3.json"),
     }
     schedule_name, start_name = mapping.get(variant, mapping["SingleRobot"])
     return data_dir / schedule_name, data_dir / start_name
@@ -335,7 +338,9 @@ class MonitorNode:
                 history[-1] = (packet.t, node_id)
 
             target_coord = tuple(packet.current_target_node)
-            target_node_id = self.gpc.get_node_id(target_coord)
+            print(f"Target coord: {packet.current_target_node}")
+            target_node_id = self.gpc.get_node_id(packet.current_target_node)
+            print(f"Node_id: {target_node_id}")
 
         self.coord.update_horizon(rid, self._prediction_from_packet(packet))
         self.coord.update_curr_pose(rid, pose)

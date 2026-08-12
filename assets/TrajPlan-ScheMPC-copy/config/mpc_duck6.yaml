@@ -18,14 +18,14 @@ nstcobs: 12  # Number of variables per obstacles, (4 edges * 3 per edge)
 Ndynobs: 15  # Maximal number of dynamic obstacles
 ndynobs: 6   # Number of variables per dynamic obstacle
 # Penalty weights
-lin_vel_penalty: 0.0      # Penalizes speed magnitude |v|. Lower if timid, higher if it rushes.
-lin_acc_penalty: 0.0      # Penalizes dv/dt. Increase for forward/backward dithering or jerky starts.
+lin_vel_penalty: 0.25      # Penalizes speed magnitude |v|. Lower if timid, higher if it rushes.
+lin_acc_penalty: 0.125      # Penalizes dv/dt. Increase for forward/backward dithering or jerky starts.
 ang_vel_penalty: 0.0      # Penalizes angular speed |w|. Increase only if turns are too aggressive overall.
-ang_acc_penalty: 0.02 #0.04      # Penalizes dw/dt. Increase for smoother turning, decrease for faster yaw response.
-qrpd: 4.0 #0.75              # Path-shape term. Increase to hug the corridor/edges more closely.
+ang_acc_penalty: 0.05 #0.04      # Penalizes dw/dt. Increase for smoother turning, decrease for faster yaw response.
+qrpd: 5.0 #0.75              # Path-shape term. Increase to hug the corridor/edges more closely.
 qpos: 2.0               # Point-tracking term. Increase to hit the next ref point harder; too high can cut corners.
 qvel: 0.50 #0.075 # 1.0               # Speed-reference term on (v - v_ref)^2, not a generic "speed is bad" penalty.
-qtheta: 0.75 #2.0             # Heading term. Increase for stronger turning, decrease if it snakes.
+qtheta: 1.0 #2.0             # Heading term. Increase for stronger turning, decrease if it snakes.
 # Obstacle avoidance weights
 qstcobs: 0.0 #10.0         # Static obstacle soft cost. Increase if wall clearance is too small.
 qdynobs: 0.0 #10.0          # Predicted dynamic obstacle soft cost. Increase if it cuts too close to moving agents.

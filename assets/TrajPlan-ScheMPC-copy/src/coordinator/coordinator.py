@@ -236,8 +236,8 @@ class Coordinator:
     def validate(self):
         """ Validates current path of robots to avoid deadlock scenarios """
         # print(f'\n[coord] schedule list:{self._remaining_schedule}')
-        print(f'\n[coord] current target node:{self._current_target_node_ids}')
-        print(f'\n[coord] next node:{self._next_node_ids}')
+        # print(f'\n[coord] current target node:{self._current_target_node_ids}')
+        # print(f'\n[coord] next node:{self._next_node_ids}')
 
         # check if robots are heading towards the same node [COORDINATOR SCENE 1]
         target_node_list = set(self._current_target_node_ids.values())

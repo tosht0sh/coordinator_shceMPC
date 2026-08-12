@@ -79,7 +79,7 @@ LAPTOP_TELEMETRY_PORT = 5008
 # Coordinator: bot receives WAIT/WORK commands from the laptop.
 COORDINATOR_BIND_IP = os.getenv("MPC_COORDINATOR_BIND_IP", "0.0.0.0")
 COORDINATOR_PORT = int(os.getenv("MPC_COORDINATOR_PORT", "5010"))
-COORDINATOR_TIMEOUT = float(os.getenv("MPC_COORDINATOR_TIMEOUT", "1.0"))
+COORDINATOR_TIMEOUT = float(os.getenv("MPC_COORDINATOR_TIMEOUT", "2.5"))
 
 
 # # Neighbor trajectories: bot listens for neighbor-state packets from laptop
@@ -101,8 +101,8 @@ class BotMpcNode(DTROS):
         )
         self.cmd_topic = f"/{self.vehicle_name}/car_cmd_switch_node/cmd"
 
-        self.pose_timeout = float(os.getenv("MPC_POSE_TIMEOUT", "0.5"))
-        self.neighbor_timeout = float(os.getenv("MPC_NEIGHBOR_TIMEOUT", "0.5"))
+        self.pose_timeout = float(os.getenv("MPC_POSE_TIMEOUT", "2.5"))
+        self.neighbor_timeout = float(os.getenv("MPC_NEIGHBOR_TIMEOUT", "2.5"))
         self.ignore_speed_ref = _env_bool("MPC_IGNORE_SPEED_REF", False)
         self.report_cost = _env_bool("MPC_REPORT_COST", False)
         self.omega_scale = float(os.getenv("MPC_OMEGA_SCALE", "1.0"))
@@ -555,6 +555,7 @@ class BotMpcNode(DTROS):
 
             pose = self._latest_pose
             cmd = self._last_action
+            rospy.loginfo_throttle(self.config_mpc.ts,f"coord_status: {self.coord_mode}")
             rospy.loginfo_throttle(
                 self.config_mpc.ts,
                 f"[mpc_runtime data] pose=({pose[0]:.3f}, {pose[1]:.3f}, {pose[2]:.3f}) "
