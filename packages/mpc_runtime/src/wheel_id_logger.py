@@ -38,7 +38,7 @@ class TcpCsvSender:
     """Best-effort TCP CSV streamer for host-side logging."""
 
     def __init__(self, header: list[str]) -> None:
-        self.host = "192.168.1.10" #os.getenv("WHEEL_ID_TCP_HOST", "").strip()
+        self.host = "192.168.1.9" #os.getenv("WHEEL_ID_TCP_HOST", "").strip()
         self.port = "5015" #int(os.getenv("WHEEL_ID_TCP_PORT", "5015"))
         self.timeout = float(os.getenv("WHEEL_ID_TCP_TIMEOUT", "1.0"))
         self.retry_sec = float(os.getenv("WHEEL_ID_TCP_RETRY_SEC", "2.0"))

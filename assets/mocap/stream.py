@@ -13,7 +13,7 @@ from typing import Dict, Iterable, Tuple
 import qtm
 
 # Tosh Laptop
-TARGET_IP = "192.168.1.10"       # target on which qtm coords are sent to
+TARGET_IP = "192.168.1.9"       # target on which qtm coords are sent to
 
 # Kim Latop
 # TARGET_IP = "192.168.1.10"       # target on which qtm coords are sent to

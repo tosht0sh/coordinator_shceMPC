@@ -48,6 +48,27 @@ class Coordinator:
         self.active_conflicts = {}
         self._pending_replans = {}          # replans for scenario 3
 
+        self._routes = None
+        self._jobs_list = None
+        self._remaining_task_ids = None
+
+        # task tracking
+        self._current_job = {}
+
+        self.dummy_mode = True
+        self.dummy_data = None
+
+        if self.dummy_mode:
+            dummy_path = pathlib.Path(__file__).with_name(
+                os.getenv("MPC_COORD_DUMMY_DATA", "dummy_data_real1.json")
+            )
+
+            with dummy_path.open(
+                "r",
+                encoding="utf-8",
+            ) as read_file:
+                self.dummy_data = json.load(read_file)
+
         for rid in self._robot_ids:
             robot_schedule = self._total_schedule[self._total_schedule["robot_id"] == rid]
             self._remaining_nodes[rid] = robot_schedule["node_id"].tolist()
@@ -66,29 +87,6 @@ class Coordinator:
             self._remaining_nodes[rid].pop(0)
             self._remaining_schedule[rid].pop(0)
 
-            self._routes = None
-            self._jobs_list = None
-            self._remaining_task_ids = None
-
-            # task tracking
-            self._current_job = {}
-
-            self.dummy_mode = True
-            self.dummy_data = None
-
-            if self.dummy_mode:
-                dummy_path = pathlib.Path(__file__).with_name(
-                    "dummy_data.json"
-                )
-
-                with dummy_path.open(
-                    "r",
-                    encoding="utf-8",
-                ) as read_file:
-                    self.dummy_data = json.load(read_file)
-                
-                # print(self.dummy_data)
-
 
     @classmethod
     def from_csv(cls, csv_path: str, csv_sep:str=','):
@@ -102,11 +100,22 @@ class Coordinator:
 
         self.add_target_coords()
 
-    def save_initial_route(self, routes):
+    def save_initial_route(self, routes=None):
         self._routes = routes
 
         if self.dummy_mode:
+            if self._jobs_list is None:
+                self.save_jobs()
             self._routes = self.dummy_data["initial_routes"]
+        elif self._routes is None:
+            raise ValueError("save_initial_route requires routes when dummy_mode is disabled.")
+
+        missing_routes = set(self._robot_ids) - set(self._routes)
+        if missing_routes:
+            raise ValueError(
+                f"Missing routes for robot IDs {sorted(missing_routes)}. "
+                "Check that the selected coordinator dummy data matches the schedule."
+            )
 
         print(f'[coord] Initial routes: {self._routes}')
 
@@ -126,7 +135,7 @@ class Coordinator:
                 
         # print(f'[coord] remaining task ids: {self._remaining_task_ids}')
 
-    def save_jobs(self, jobs_list):
+    def save_jobs(self, jobs_list=None):
         self._jobs_list = jobs_list
 
         if self.dummy_mode:
@@ -149,8 +158,15 @@ class Coordinator:
 
 
     def update_target_nodes(self, robot_id, target_node):
+
+        if not self._current_job:
+            self.save_jobs()
+            self.save_initial_route()
         
         if len(self._current_target_node_ids) == len(self._robot_ids):
+
+            print(f"RIDs: {self._prev_node_ids}")
+            print(f"Current id: {self._current_job}")
             
             if self._current_target_node_ids[robot_id] != target_node:
                 for node, conflicts in list(self.active_conflicts.items()):
