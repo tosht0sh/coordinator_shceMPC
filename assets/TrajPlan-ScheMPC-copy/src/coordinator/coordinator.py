@@ -14,8 +14,9 @@ from basic_map.graph import NetGraph
 from pkg_sche.sp_comsat.Compo_slim import Compo_slim
 from coordinator.local_replanning import repair_robot_path
 
-VEHICLE_WIDTH = 0.2
-VEHICLE_MARGIN = 0.1
+VEHICLE_WIDTH = 0.1
+VEHICLE_MARGIN = 0.2
+CROSSING_RELEASE_RADIUS = 0.2
 
 class Coordinator:
     """
@@ -117,7 +118,7 @@ class Coordinator:
                 "Check that the selected coordinator dummy data matches the schedule."
             )
 
-        print(f'[coord] Initial routes: {self._routes}')
+        # print(f'[coord] Initial routes: {self._routes}')
 
         self._remaining_task_ids = {
             rid: list(route["tasks"]) for rid, route in self._routes.items()
@@ -164,9 +165,6 @@ class Coordinator:
             self.save_initial_route()
         
         if len(self._current_target_node_ids) == len(self._robot_ids):
-
-            print(f"RIDs: {self._prev_node_ids}")
-            print(f"Current id: {self._current_job}")
             
             if self._current_target_node_ids[robot_id] != target_node:
                 for node, conflicts in list(self.active_conflicts.items()):
@@ -500,6 +498,18 @@ class Coordinator:
         if(pending_replan and pending_replan["status"] == "approaching_handoff"):
             self.update_target_nodes(rid, self._next_node_ids[rid])
 
+    def release_crossing_robot(self, rid):
+        """Mark a robot as past its shifted crossing target."""
+
+        next_node = self._next_node_ids.get(rid)
+        if next_node is not None:
+            self.update_target_nodes(rid, next_node)
+            return
+
+        for node, conflict in list(self.active_conflicts.items()):
+            if rid in conflict.get("crossing", []):
+                self.active_conflicts.pop(node)
+
     def take_ready_replan(self, rid):
         pending_replan = self._pending_replans.get(rid)
 
@@ -553,15 +563,4 @@ class Coordinator:
 
 
 # TODO:
-# 1. [DONE]coordinator scene 3 - position
-# 1. coordinator scene 3 - selection policy?
-# 2. coordinator scene 3 - setup: 
-#       [DONE]add loading from dummy_data.json 
-#       [DONE]send data to local_replanning.py 
-#       [DONE]build problem and correct data imports for replanning 
-#       [DONE]send problem to compo slim 
-#       [DONE]stop the not replanned robot and make the replan robot earch target
-#       integrate new path of robot and resume the stopped robot 
-#       ensure that mpc planner is doing correct work
-# 3. coordinator scene 3 - testing
 # 4. test scene 1 usage on the big demo

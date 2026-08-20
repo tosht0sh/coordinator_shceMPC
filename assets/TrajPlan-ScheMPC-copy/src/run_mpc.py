@@ -101,7 +101,7 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
     #### SIMULATION SCHEDULES
     ## Load schedule of CoordScene1 & CoordScene2
     # schedule_path = os.path.join(data_dir, "schedule_CoordScene1.csv")
-    schedule_path = os.path.join(data_dir, "schedule_CoordScene2.csv")
+    # schedule_path = os.path.join(data_dir, "schedule_CoordScene2.csv")
     start_path = os.path.join(data_dir, "robot_start_CoordScene2.json")
 
     ## Load schedule of CoordScene3
@@ -397,7 +397,7 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
             ### Real run
             # if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
             if (not using_live_state) and (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
-                if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.8) or planner.idle:
+                # if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.8) or planner.idle:
                     robot.step(actions[-1])
             robot_manager.set_pred_states(rid, np.asarray(pred_states))
 

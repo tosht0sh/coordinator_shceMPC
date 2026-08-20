@@ -165,6 +165,8 @@ class BotMpcNode(DTROS):
 
         # Fail safe: motion is disabled until a fresh WORK command is received.
         self.coord_mode = "WAIT"
+        self.coord_target_coord: Optional[list[float]] = None
+        self._applied_crossing_target: Optional[tuple[float, float]] = None
         self._last_coordinator_rx_time: Optional[float] = None
         self._last_coordinator_sequence = -1
 
@@ -329,6 +331,7 @@ class BotMpcNode(DTROS):
             self._logical_robot_id = packet.robot_id
             self._schedule_epoch = rospy.get_time() + max(0.0, packet.effective_from)
             self._idle_stop_sent = False
+            self._applied_crossing_target = None
             self.agent.load_schedule(
                 start_state=np.asarray(packet.start_state, dtype=float),
                 path_coords=[tuple(point) for point in packet.path_coords],
@@ -402,7 +405,7 @@ class BotMpcNode(DTROS):
             return
 
         mode = packet.mode.strip().upper()
-        if mode not in {"WAIT", "WORK"}:
+        if mode not in {"WAIT", "WORK", "CROSSING"}:
             rospy.logwarn_throttle(2.0, "Unsupported coordinator mode: %s", packet.mode)
             return
 
@@ -412,11 +415,15 @@ class BotMpcNode(DTROS):
         self._last_coordinator_sequence = packet.sequence
         self._last_coordinator_rx_time = rospy.get_time()
         self.coord_mode = mode
+        self.coord_target_coord = packet.target_coord
+        if mode != "CROSSING":
+            self._applied_crossing_target = None
         rospy.loginfo_throttle(
             1.0,
-            "Coordinator mode for %s: %s",
+            "Coordinator mode for %s: %s target=%s",
             self._logical_robot_id,
             self.coord_mode,
+            self.coord_target_coord,
         )
 
     def _poll_coordinator_socket(self, max_packets: int = 32) -> None:
@@ -429,6 +436,25 @@ class BotMpcNode(DTROS):
                 rospy.logwarn_throttle(2.0, "Coordinator UDP receive failed: %s", exc)
                 return
             self._handle_coordinator_packet(packet, sender)
+
+    def _apply_crossing_target_if_needed(self, t_now: float) -> None:
+        if self.coord_mode != "CROSSING" or self.coord_target_coord is None:
+            return
+
+        target = (
+            float(self.coord_target_coord[0]),
+            float(self.coord_target_coord[1]),
+        )
+        if target == self._applied_crossing_target:
+            return
+
+        self.agent.apply_shifted_target(list(target), t_now)
+        self._applied_crossing_target = target
+        rospy.loginfo(
+            "Applied coordinator shifted target for %s: %s",
+            self._logical_robot_id,
+            target,
+        )
 
     def _clip_action(self, action: np.ndarray) -> np.ndarray:
         clipped = np.asarray(action, dtype=float).copy()
@@ -538,8 +564,10 @@ class BotMpcNode(DTROS):
 
             other_robot_states = self._other_robot_states_for_step()
             self.agent.set_state(self._latest_pose)
+            t_now = max(0.0, rospy.get_time() - self._schedule_epoch)
+            self._apply_crossing_target_if_needed(t_now)
             step_result = self.agent.step(
-                t_now=max(0.0, rospy.get_time() - self._schedule_epoch),
+                t_now=t_now,
                 other_robot_states=other_robot_states,
                 ignore_speed_ref=self.ignore_speed_ref,
                 report_cost=self.report_cost,

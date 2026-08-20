@@ -42,7 +42,7 @@ from pkg_motion_plan.global_path_coordinate import GlobalPathCoordinator
 from visualizer.mpc_plot import MpcPlotInLoop
 from visualizer.object import CircularVehicleVisualizer
 
-from coordinator.coordinator import Coordinator
+from coordinator.coordinator import Coordinator, CROSSING_RELEASE_RADIUS
 
 
 DATA_NAME = os.getenv("MPC_DATA_NAME", "schedule_demo2_data")
@@ -338,14 +338,30 @@ class MonitorNode:
                 history[-1] = (packet.t, node_id)
 
             target_coord = tuple(packet.current_target_node)
-            print(f"Target coord: {packet.current_target_node}")
+            # print(f"Target coord: {packet.current_target_node}")
             target_node_id = self.gpc.get_node_id(packet.current_target_node)
-            print(f"Node_id: {target_node_id}")
+            # print(f"Node_id: {target_node_id}")
 
         self.coord.update_horizon(rid, self._prediction_from_packet(packet))
         self.coord.update_curr_pose(rid, pose)
 
-        if target_node_id is not None:
+        if rid in self.coord_shifted_targets_compensated:
+            compensation = self.coord_shifted_targets_compensated[rid]
+            shifted_target = compensation["new_target"]
+            shifted_xy = np.asarray(shifted_target, dtype=float)
+
+            if np.linalg.norm(pose[:2] - shifted_xy) <= CROSSING_RELEASE_RADIUS:
+                self.coord.release_crossing_robot(rid)
+                self.coord_shifted_targets_compensated.pop(rid, None)
+                self.coord_shifted_targets.pop(rid, None)
+                print(f"[Monitor] Released crossing conflict for {rid} at shifted target {list(shifted_target)}")
+            elif target_node_id is not None and target_node_id != compensation["parent_node"]:
+                self.coord_shifted_targets_compensated.pop(rid, None)
+                self.coord_shifted_targets.pop(rid, None)
+                self.coord.update_target_nodes(rid, target_node_id)
+            else:
+                self.coord.update_target_nodes(rid, compensation["parent_node"])
+        elif target_node_id is not None:
             self.coord.update_target_nodes(rid, target_node_id)
 
         if SHADOW_SIM:
@@ -386,18 +402,61 @@ class MonitorNode:
         self.coord.update_time(coord_time)
 
         decisions = self.coord.validate() or {}
+        released_crossing = False
+        for source_rid, decision in decisions.items():
+            if decision["mode"] != "crossing" or decision.get("target_coord") is None:
+                continue
 
-        # TODO: this does not seem to be correct, change maybe?
-        requested_modes = {rid: "WORK" for rid in self.robot_ids}
+            rid = str(source_rid)
+            packet = self.latest_packet.get(rid)
+            if packet is None:
+                continue
+
+            pose_xy = np.asarray(packet.pose[:2], dtype=float)
+            target_xy = np.asarray(decision["target_coord"], dtype=float)
+            if np.linalg.norm(pose_xy - target_xy) <= CROSSING_RELEASE_RADIUS:
+                self.coord.release_crossing_robot(rid)
+                self.coord_shifted_targets_compensated.pop(rid, None)
+                self.coord_shifted_targets.pop(rid, None)
+                released_crossing = True
+                print(f"[Monitor] Released crossing conflict for {rid} at shifted target {target_xy.tolist()}")
+
+        if released_crossing:
+            decisions = self.coord.validate() or {}
+
+        requested_modes = {
+            rid: {"mode": "WORK", "target_coord": None}
+            for rid in self.robot_ids
+        }
 
         # change mode to WAIT for the robot wherever needed
         for source_rid, decicsion in decisions.items():
             rid = str(source_rid)
 
             if decicsion["mode"] == "stopped":
-                requested_modes[rid] = "WAIT"
+                requested_modes[rid] = {"mode": "WAIT", "target_coord": None}
+            elif decicsion["mode"] == "crossing":
+                target_coord = tuple(decicsion["target_coord"])
+                parent_node = self.coord._current_target_node_ids.get(rid)
+                compensation = self.coord_shifted_targets_compensated.get(rid)
+
+                if compensation is None:
+                    self.coord_shifted_targets_compensated[rid] = {
+                        "parent_node": parent_node,
+                        "new_target": target_coord,
+                    }
+                else:
+                    compensation["new_target"] = target_coord
+
+                self.coord_shifted_targets[rid] = target_coord
+                requested_modes[rid] = {
+                    "mode": "CROSSING",
+                    "target_coord": list(target_coord),
+                }
             else:
-                requested_modes[rid] = "WORK"
+                self.coord_shifted_targets_compensated.pop(rid, None)
+                self.coord_shifted_targets.pop(rid, None)
+                requested_modes[rid] = {"mode": "WORK", "target_coord": None}
 
         self._send_coordinator_modes(requested_modes)
 
@@ -405,7 +464,7 @@ class MonitorNode:
         if self.coord_sock is None:
             return
 
-        for rid, mode in requested_modes.items():
+        for rid, request in requested_modes.items():
             endpoint = self.endpoint_map.get(rid)
 
             if endpoint is None:
@@ -417,10 +476,11 @@ class MonitorNode:
 
             host, _ = endpoint
 
-            packet = CoordinatorModePacket(robot_id = rid,
-                        mode = mode,
+            packet = CoordinatorModePacket(robot_id=rid,
+                        mode=request["mode"],
                         sequence=self.coord_sequence,
-                        sent_at = time.time()
+                        sent_at=time.time(),
+                        target_coord=request["target_coord"],
                     )
 
             self.coord_sock.sendto(packet_to_wire(packet), (host, COORDINATOR_PORT))

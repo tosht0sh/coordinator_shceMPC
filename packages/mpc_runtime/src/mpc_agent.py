@@ -131,6 +131,39 @@ class MpcAgent:
         self._schedule_loaded = True
         self._actual_timetable.clear()
 
+    def apply_shifted_target(self, target_coord: List[float], current_time: float) -> None:
+        """Temporarily route through a coordinator-provided shifted target."""
+
+        if not self._schedule_loaded:
+            raise RuntimeError("No schedule loaded. Call load_schedule(...) first.")
+
+        current_xy = (float(self.robot.state[0]), float(self.robot.state[1]))
+        shifted_xy = (float(target_coord[0]), float(target_coord[1]))
+        path_coords: List[PathNode] = [current_xy, shifted_xy]
+
+        base_path = self.planner._ref_path
+        base_times = self.planner._ref_path_time
+        base_idx = self.planner._current_target_node_idx
+
+        if base_path is not None and base_idx is not None and base_idx + 1 < len(base_path):
+            resume_xy = tuple(base_path[base_idx + 1])
+            if resume_xy != shifted_xy:
+                path_coords.extend(tuple(point) for point in base_path[base_idx + 1:])
+
+        path_times = None
+        if base_times is not None and base_idx is not None:
+            shifted_eta = max(float(base_times[base_idx]), float(current_time) + self.planner.ts)
+            path_times = [float(current_time), shifted_eta]
+            path_times.extend(float(time_point) for time_point in base_times[base_idx + 1:])
+
+        self.planner.load_path(
+            path_coords,
+            path_times,
+            nomial_speed=self.config_robot.lin_vel_max,
+            method="linear",
+        )
+        # self._map_refresh_needed = True
+
     def set_state(self, state: np.ndarray) -> None:
         self.robot.set_state(np.asarray(state, dtype=float))
 

@@ -177,6 +177,7 @@ class CoordinatorModePacket:
     mode: str
     sequence: int
     sent_at: float
+    target_coord: Optional[List[float]] = None
     kind: str = field(init=False, default="coordinator_mode")
 
     def to_payload(self) -> JsonDict:
@@ -184,11 +185,13 @@ class CoordinatorModePacket:
 
     @classmethod
     def from_payload(cls, payload: JsonDict) -> "CoordinatorModePacket":
+        target_coord = payload.get("target_coord")
         return cls(
             robot_id=str(payload["robot_id"]),
             mode=str(payload["mode"]),
             sequence=int(payload.get("sequence", 0)),
             sent_at=float(payload.get("sent_at", 0.0)),
+            target_coord=None if target_coord is None else _float_list(target_coord),
         )
 
 

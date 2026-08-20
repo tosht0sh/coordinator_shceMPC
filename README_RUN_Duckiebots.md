@@ -81,7 +81,7 @@ docker -H=duck2.local rm -f duck2_mpc duck2_mocap duck2_odometry
 | Bot telemetry | bot to laptop | UDP | `5008` |
 | Mocap pose packets | laptop to bot | UDP | `5005` |
 | Neighbor trajectory relay | laptop to bot | UDP | `5009` |
-| Coordinator `WAIT`/`WORK` commands | laptop to bot | UDP | `5010` |
+| Coordinator `WAIT`/`WORK`/`CROSSING` commands | laptop to bot | UDP | `5010` |
 
 ## Scenario Values
 
@@ -93,7 +93,7 @@ terminal.
 | --- | --- | --- | --- |
 | Single robot | `SingleRobotEnv` | `SingleRobot` | `A1` |
 | Two robots | `TwoRobotEnv` | `TwoRobots` | `A1`, `A2` |
-| Three robots | `MultiRobotEnv` | `MultiRobot` | `A1`, `A2`, `A3` |
+| MultiRobot Scene 1 | `MultiRobotEnv` | `MultiRobot` | `A1`, `A2` |
 
 The live monitor and dispatcher read prepared files from:
 
@@ -104,6 +104,19 @@ assets/TrajPlan-ScheMPC-copy/data/schedule_demo2_data
 `data/test_cases/*.json` is used when regenerating schedules. If you regenerate
 a schedule from a test case, keep `test_data.Environment` consistent with the
 `MPC_ENV_FOLDER` you plan to run.
+
+For physical coordinator runs, the monitor needs route/job context. Use
+`MPC_COORD_DUMMY_DATA` to select the matching file in
+`assets/TrajPlan-ScheMPC-copy/src/coordinator`.
+
+| Run | Coordinator dummy data |
+| --- | --- |
+| Single robot | `dummy_data_real1.json` |
+| MultiRobot Scene 1 | `dummy_data_real_cs1.json` |
+
+If `coordinator.py` has `dummy_mode = True`, this dummy file must match the
+selected schedule variant. If it does not, the monitor can fail with a missing
+route error such as `Missing routes for robot IDs ['A2']`.
 
 ## Single Robot Mocap Run
 
@@ -160,6 +173,7 @@ cd /home/kim/dev/coordinator_shceMPC
 source assets/TrajPlan-ScheMPC-copy/.venv/bin/activate
 export MPC_ENV_FOLDER=SingleRobotEnv
 export MPC_SCHEDULE_VARIANT=SingleRobot
+export MPC_COORD_DUMMY_DATA=dummy_data_real1.json
 export MPC_TELEMETRY_PORT=5008
 export MPC_BOT_ENDPOINTS='{"A1":{"host":"192.168.1.12","port":5007}}'
 python3 assets/TrajPlan-ScheMPC-copy/src/monitor_node.py
@@ -255,13 +269,16 @@ export MPC_BOT_ENDPOINTS='{"A1":{"host":"192.168.1.12","port":5007},"A2":{"host"
 python3 assets/TrajPlan-ScheMPC-copy/src/scheduler_dispatcher.py
 ```
 
-## Three Robot Mocap Run
+## MultiRobot Scene 1 Mocap Run
 
 This example maps:
 
 - `A1` to `duck2` at `192.168.1.12`
 - `A2` to `duck4` at `192.168.1.13`
-- `A3` to `duck6` at `192.168.1.14`
+
+This run uses `MultiRobotEnv` to test Coordinator Scene 1. Both robots target
+`N11`, so the monitor should send one bot `WAIT` and the other `CROSSING` with
+a shifted target coordinate.
 
 ### Bot Terminal 1: duck2 mocap receiver
 
@@ -291,20 +308,6 @@ cd /home/kim/dev/coordinator_shceMPC
 dts devel run -H duck4 -L mpc_runtime -n duck4_mpc
 ```
 
-### Bot Terminal 5: duck6 mocap receiver
-
-```bash
-cd /home/kim/dev/coordinator_shceMPC
-dts devel run -H duck6 -L mocap_reciever -n duck6_mocap
-```
-
-### Bot Terminal 6: duck6 MPC runtime
-
-```bash
-cd /home/kim/dev/coordinator_shceMPC
-dts devel run -H duck6 -L mpc_runtime -n duck6_mpc
-```
-
 ### Laptop Terminal 1: mocap pose distributor
 
 ```bash
@@ -328,8 +331,9 @@ cd /home/kim/dev/coordinator_shceMPC
 source assets/TrajPlan-ScheMPC-copy/.venv/bin/activate
 export MPC_ENV_FOLDER=MultiRobotEnv
 export MPC_SCHEDULE_VARIANT=MultiRobot
+export MPC_COORD_DUMMY_DATA=dummy_data_real_cs1.json
 export MPC_TELEMETRY_PORT=5008
-export MPC_BOT_ENDPOINTS='{"A1":{"host":"192.168.1.12","port":5007},"A2":{"host":"192.168.1.13","port":5007},"A3":{"host":"192.168.1.14","port":5007}}'
+export MPC_BOT_ENDPOINTS='{"A1":{"host":"192.168.1.12","port":5007},"A2":{"host":"192.168.1.13","port":5007}}'
 python3 assets/TrajPlan-ScheMPC-copy/src/monitor_node.py
 ```
 
@@ -340,7 +344,7 @@ cd /home/kim/dev/coordinator_shceMPC
 source assets/TrajPlan-ScheMPC-copy/.venv/bin/activate
 export MPC_ENV_FOLDER=MultiRobotEnv
 export MPC_SCHEDULE_VARIANT=MultiRobot
-export MPC_BOT_ENDPOINTS='{"A1":{"host":"192.168.1.12","port":5007},"A2":{"host":"192.168.1.13","port":5007},"A3":{"host":"192.168.1.14","port":5007}}'
+export MPC_BOT_ENDPOINTS='{"A1":{"host":"192.168.1.12","port":5007},"A2":{"host":"192.168.1.13","port":5007}}'
 python3 assets/TrajPlan-ScheMPC-copy/src/scheduler_dispatcher.py
 ```
 
@@ -398,6 +402,16 @@ python3 assets/TrajPlan-ScheMPC-copy/src/scheduler_dispatcher.py
 
 Check that `mpc_runtime` is already running on that bot and that
 `MPC_BOT_ENDPOINTS` points to the bot IP on port `5007`.
+
+The endpoint variable must be exported in the same terminal and must be valid
+JSON. The keys must match the schedule robot IDs, such as `A1` and `A2`.
+
+```bash
+export MPC_BOT_ENDPOINTS='{"A1":{"host":"192.168.1.12","port":5007},"A2":{"host":"192.168.1.13","port":5007}}'
+```
+
+`No route to host` means the laptop cannot reach that IP address. Check the bot
+IP, Wi-Fi/network, and whether the laptop can ping the bot.
 
 ### Monitor shows no telemetry
 
