@@ -22,7 +22,7 @@ lin_vel_penalty: 0.25      # Penalizes speed magnitude |v|. Lower if timid, high
 lin_acc_penalty: 0.125     # Penalizes dv/dt. Increase for forward/backward dithering or jerky starts.
 ang_vel_penalty: 0.0     # Penalizes angular speed |w|. Increase only if turns are too aggressive overall.
 ang_acc_penalty: 0.001 #0.04      # Penalizes dw/dt. Increase for smoother turning, decrease for faster yaw response.
-qrpd: 10.0 #0.75              # Path-shape term. Increase to hug the corridor/edges more closely.
+qrpd: 20.0 #0.75              # Path-shape term. Increase to hug the corridor/edges more closely.
 qpos: 0.1               # Point-tracking term. Increase to hit the next ref point harder; too high can cut corners.
 qvel: 0.0 #0.075 # 1.0               # Speed-reference term on (v - v_ref)^2, not a generic "speed is bad" penalty.
 qtheta: 2.0 #2.0             # Heading term. Increase for stronger turning, decrease if it snakes.

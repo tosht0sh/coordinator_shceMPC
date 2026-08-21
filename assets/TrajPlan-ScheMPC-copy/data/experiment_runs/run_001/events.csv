@@ -1,0 +1,7 @@
+run_id,robot_id,event,t_laptop,t_robot,schedule_id,details
+run_001,A1,schedule_dispatched,83517.172118879,,SingleRobotEnv:SingleRobot,"host=192.168.1.12,port=5007,send_map=True"
+run_001,duck2,status,83518.038210872,1776168576.8710983,schedule-default,Loaded map SingleRobotEnv
+run_001,A1,status,83518.044770818,1776168576.8779182,SingleRobotEnv:SingleRobot,Loaded schedule SingleRobotEnv:SingleRobot
+run_001,A1,schedule_loaded,83518.045202713,1776168576.8783233,SingleRobotEnv:SingleRobot,path_points=5
+run_001,A1,first_mpc_command,83519.069509582,1776168577.8515284,SingleRobotEnv:SingleRobot,"v=0.342108,omega=-0.103733"
+run_001,A1,first_nonzero_command,83519.069751613,1776168577.851988,SingleRobotEnv:SingleRobot,"v=0.342108,omega=-0.103733"

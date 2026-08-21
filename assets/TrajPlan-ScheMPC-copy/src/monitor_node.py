@@ -14,9 +14,11 @@ network plumbing.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import pathlib
+import shutil
 import socket
 import sys
 import time
@@ -57,9 +59,21 @@ MONITOR_AUTORUN = os.getenv("MPC_MONITOR_AUTORUN", "1").strip().lower() in {"1",
 MAP_ONLY = os.getenv("MPC_MONITOR_MAP_ONLY", "1").strip().lower() in {"1", "true", "yes", "on"}
 SHADOW_SIM = False #os.getenv("MPC_SHADOW_SIM", "1").strip().lower() in {"1", "true", "yes", "on"}
 OUTPUT_CSV = os.getenv("MPC_MONITOR_ACTUAL_CSV", "Actual_monitor.csv")
+MONITOR_LOG_CSV = os.getenv("MPC_MONITOR_LOG_CSV", "monitor_log.csv")
 IDLE_TIMEOUT = float(os.getenv("MPC_MONITOR_IDLE_TIMEOUT", "0.1"))
 
 COORDINATOR_PORT = int(os.getenv("COORDINATOR_PORT", "5010"))
+MONITOR_LOG_FIELDS = [
+    "robot_id",
+    "schedule_id",
+    "t",
+    "x",
+    "y",
+    "theta",
+    "v",
+    "w",
+    "target_node_id",
+]
 
 
 def _load_endpoint_map() -> Dict[str, Tuple[str, int]]:
@@ -102,6 +116,18 @@ def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path,
     return data_dir / schedule_name, data_dir / start_name
 
 
+def _next_experiment_run_dir(root_dir: pathlib.Path) -> pathlib.Path:
+    root_dir.mkdir(parents=True, exist_ok=True)
+    run_numbers = [
+        int(path.name)
+        for path in root_dir.iterdir()
+        if path.is_dir() and len(path.name) == 3 and path.name.isdigit()
+    ]
+    run_dir = root_dir / f"{(max(run_numbers, default=0) + 1):03d}"
+    run_dir.mkdir()
+    return run_dir
+
+
 class MonitorNode:
     """Receive telemetry, update plots, and relay neighbor trajectories to the bots."""
 
@@ -115,6 +141,12 @@ class MonitorNode:
         self.env_folder = env_folder
         self.endpoint_map = _load_endpoint_map()
         self.neighbor_relay_enabled = NEIGHBOR_RELAY and bool(self.endpoint_map)
+        self.experiment_run_dir = _next_experiment_run_dir(self.root_dir / "data" / "experiment_runs")
+        self.monitor_log_path = self.experiment_run_dir / MONITOR_LOG_CSV
+        self.actual_schedule_path = self.experiment_run_dir / OUTPUT_CSV
+        self.monitor_log_file = self.monitor_log_path.open("w", newline="", encoding="utf-8")
+        self.monitor_log_writer = csv.DictWriter(self.monitor_log_file, fieldnames=MONITOR_LOG_FIELDS)
+        self.monitor_log_writer.writeheader()
 
         config_mpc_path = self.config_dir / os.getenv("MPC_CFG_NAME", "mpc_fast.yaml")
         config_robot_path = self.config_dir / "robot_spec.yaml"
@@ -122,6 +154,7 @@ class MonitorNode:
         self.config_robot = CircularRobotSpecification.from_yaml(str(config_robot_path))
 
         schedule_path, start_path = _schedule_paths(self.data_dir, SCHEDULE_VARIANT)
+        shutil.copy2(schedule_path, self.experiment_run_dir / schedule_path.name)
         map_path = self.data_dir / env_folder / "map.json"
         graph_path = self.data_dir / env_folder / "graph.json"
         with open(start_path, "r", encoding="utf-8") as handle:
@@ -142,6 +175,12 @@ class MonitorNode:
         self.plotter = MpcPlotInLoop(self.config_robot, map_only=MAP_ONLY, fig_ratio=(map_width / map_height))
         self.plotter.plot_in_loop_pre(self.gpc.current_map, graph_manager=self.gpc.current_graph)
 
+        self.schedule_node_ids: Dict[str, List[str]] = {}
+        for rid in self.robot_ids:
+            source_robot_id = self.robot_id_lookup[rid]
+            path_nodes, _, _ = self.gpc.get_schedule_with_node_index(source_robot_id)
+            self.schedule_node_ids[rid] = [str(node_id) for node_id in path_nodes]
+
         self.color_list = [
             "#0072B2", "#D55E00", "#009E73", "#F0E442", "#56B4E9",
             "#E69F00", "#CC79A7", "#0072B2", "#D55E00", "#009E73",
@@ -151,7 +190,11 @@ class MonitorNode:
         self.shadow_model = UnicycleModel(sampling_time=self.config_mpc.ts)
         self.shadow_states: Dict[str, np.ndarray] = {}
         self.last_packet_time: Dict[str, float] = {}
-        self.actual_timetable: Dict[str, List[Tuple[float, Optional[object]]]] = {rid: [] for rid in self.robot_ids}
+        self.actual_timetable: Dict[str, List[Tuple[float, Optional[object]]]] = {
+            rid: [(0.0, self.schedule_node_ids[rid][0])] if self.schedule_node_ids[rid] else []
+            for rid in self.robot_ids
+        }
+        self.completed_robot_ids: set[str] = set()
         self.latest_packet: Dict[str, TelemetryPacket] = {}
         self._relay_warned_missing_endpoint: set[str] = set()
 
@@ -206,6 +249,7 @@ class MonitorNode:
         }
 
         print(f"[Monitor] Listening for telemetry on {TELEMETRY_BIND_IP}:{TELEMETRY_PORT}")
+        print(f"[Monitor] Experiment run folder: {self.experiment_run_dir}")
         if self.neighbor_relay_enabled:
             print(f"[Monitor] Relaying neighbor trajectories to bots on UDP port {NEIGHBOR_PORT}")
         elif NEIGHBOR_RELAY:
@@ -230,6 +274,73 @@ class MonitorNode:
             if not isinstance(decoded, TelemetryPacket):
                 continue
             self._handle_telemetry(decoded)
+
+    def _node_id_from_coord(self, coord) -> Optional[object]:
+        if coord is None:
+            return None
+
+        coord_xy = np.asarray(coord[:2], dtype=float)
+        for node_id in self.gpc.current_graph.nodes:
+            node_xy = np.asarray(self.gpc.current_graph.get_node_coord(node_id), dtype=float)
+            if np.allclose(coord_xy, node_xy, atol=1e-6):
+                return str(node_id)
+        return None
+
+    def _infer_next_schedule_node_id(self, rid: str) -> Optional[str]:
+        schedule_nodes = self.schedule_node_ids.get(rid, [])
+        history = self.actual_timetable.get(rid, [])
+        if not schedule_nodes or not history:
+            return None
+
+        last_node_id = str(history[-1][1])
+        try:
+            last_index = schedule_nodes.index(last_node_id)
+        except ValueError:
+            return None
+
+        if last_index + 1 < len(schedule_nodes):
+            return schedule_nodes[last_index + 1]
+        return schedule_nodes[-1]
+
+    def _target_node_id_from_packet(self, rid: str, packet: TelemetryPacket) -> Optional[str]:
+        target_node_id = self._node_id_from_coord(packet.current_target_node)
+        if target_node_id is not None:
+            return target_node_id
+
+        if packet.current_target_node is None:
+            return self._infer_next_schedule_node_id(rid)
+
+        return None
+
+    def _update_actual_timetable(self, rid: str, t: float, target_node_id: Optional[str], status: str) -> None:
+        if target_node_id is None or rid in self.completed_robot_ids:
+            return
+
+        history = self.actual_timetable[rid]
+        first_node_id = self.schedule_node_ids[rid][0] if self.schedule_node_ids[rid] else None
+        if history and history[-1][1] == target_node_id:
+            if len(history) == 1 and target_node_id == first_node_id:
+                return
+            history[-1] = (t, target_node_id)
+        else:
+            history.append((t, target_node_id))
+
+        if status.strip().lower() == "idle":
+            self.completed_robot_ids.add(rid)
+
+    def _write_monitor_log(self, packet: TelemetryPacket, pose: np.ndarray, action: np.ndarray, target_node_id) -> None:
+        self.monitor_log_writer.writerow({
+            "robot_id": packet.robot_id,
+            "schedule_id": packet.schedule_id,
+            "t": f"{float(packet.t):.9f}",
+            "x": f"{float(pose[0]):.9f}",
+            "y": f"{float(pose[1]):.9f}",
+            "theta": f"{float(pose[2]):.9f}",
+            "v": f"{float(action[0]) if action.size >= 1 else 0.0:.9f}",
+            "w": f"{float(action[1]) if action.size >= 2 else 0.0:.9f}",
+            "target_node_id": "" if target_node_id is None else target_node_id,
+        })
+        self.monitor_log_file.flush()
 
     def _prediction_from_packet(self, packet: TelemetryPacket) -> np.ndarray:
         """Return one robot's predicted trajectory as a dense `(N_hor+1, ns)` array.
@@ -322,25 +433,14 @@ class MonitorNode:
         current_refs = np.asarray(packet.current_refs, dtype=float) if packet.current_refs else np.empty((0, 3))
         cost = 0.0 if packet.cost is None else float(packet.cost)
 
-        target_node_id = None
+        target_node_id = self._target_node_id_from_packet(rid, packet)
 
         self.plotter.update_plot(rid, packet.t, action, pose, cost, pred_states, current_refs)
         self.visualizers[rid].update(*pose)
         self.latest_packet[rid] = packet
         self.last_packet_time[rid] = time.monotonic()
-
-        if packet.current_target_node is not None:
-            node_id = self.gpc.get_node_id(tuple(packet.current_target_node))
-            history = self.actual_timetable[rid]
-            if not history or history[-1][1] != node_id:
-                history.append((packet.t, node_id))
-            else:
-                history[-1] = (packet.t, node_id)
-
-            target_coord = tuple(packet.current_target_node)
-            # print(f"Target coord: {packet.current_target_node}")
-            target_node_id = self.gpc.get_node_id(packet.current_target_node)
-            # print(f"Node_id: {target_node_id}")
+        self._write_monitor_log(packet, pose, action, target_node_id)
+        self._update_actual_timetable(rid, packet.t, target_node_id, packet.status)
 
         self.coord.update_horizon(rid, self._prediction_from_packet(packet))
         self.coord.update_curr_pose(rid, pose)
@@ -390,9 +490,8 @@ class MonitorNode:
         if not rows:
             return
         df = pd.DataFrame(rows).sort_values(["robot_id", "ETA"])
-        output_path = self.data_dir / OUTPUT_CSV
-        df.to_csv(output_path, index=False)
-        print(f"Saved monitored schedule to {output_path}")
+        df.to_csv(self.actual_schedule_path, index=False)
+        print(f"Saved monitored schedule to {self.actual_schedule_path}")
 
     def _run_coordinator(self) -> None:
         if not all(rid in self.last_packet_time for rid in self.robot_ids):
@@ -514,6 +613,7 @@ class MonitorNode:
             pass
         finally:
             self._save_actual_schedule()
+            self.monitor_log_file.close()
             self.plotter.close()
             self.sock.close()
             self.coord_sock.close()
