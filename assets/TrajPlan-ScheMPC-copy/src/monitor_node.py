@@ -201,8 +201,8 @@ class MonitorNode:
         # self.coord.save_jobs(jobs_list)
         # self.coord.save_initial_route(routes)
 
-        self.coord_modes = {
-            rid: "WAIT" for rid in self.robot_ids
+        self.coord_modes: Dict[str, Optional[str]] = {
+            rid: None for rid in self.robot_ids
         }
 
         print(f"[Monitor] Listening for telemetry on {TELEMETRY_BIND_IP}:{TELEMETRY_PORT}")
@@ -482,6 +482,15 @@ class MonitorNode:
                         sent_at=time.time(),
                         target_coord=request["target_coord"],
                     )
+
+            previous_mode = self.coord_modes.get(rid)
+            current_mode = request["mode"]
+            if previous_mode != current_mode:
+                if previous_mode is None:
+                    print(f"[Monitor] Coordinator mode for {rid}: {current_mode}")
+                else:
+                    print(f"[Monitor] Coordinator mode for {rid}: {previous_mode} -> {current_mode}")
+                self.coord_modes[rid] = current_mode
 
             self.coord_sock.sendto(packet_to_wire(packet), (host, COORDINATOR_PORT))
 

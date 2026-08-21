@@ -318,19 +318,6 @@ class Coordinator:
                             }
 
                             print(self._pending_replans)
-                            # frozen_schedules = self.frozen_schedule_builder(replan_rid)
-                            # print(f'[coord] Scene 3 stopped robot: {wait_rid}')
-                            # print(f'[coord] Total Schedule: {self._total_schedule}')
-                            # print(f'[coord] Frozen Schedules: {frozen_schedules}')
-
-                            # fff = repair_robot_path(replan_rid, self._curr_pose[replan_rid], 
-                            #                         self._prev_node_ids[replan_rid], self._current_target_node_ids[replan_rid],
-                            #                         self._graph,
-                            #                         node, self._ts, 
-                            #                         self._jobs_list, self._routes, self._remaining_task_ids,
-                            #                         frozen_schedules)
-
-                            # exit()
 
                         elif self._prev_node_ids[rid_1] == self._next_node_ids[rid_2]:
                             print('[coord] Scene 2 conflict occuring 2-->1')
@@ -451,14 +438,14 @@ class Coordinator:
         # assuming paths are in the same grid as demo, there will be change in coord of only one axis
         if curr_target_coord[0] == next_target_coord[0]:
             if next_target_coord[1] - curr_target_coord[1] > 0:
-                new_target_coord = (next_target_coord[0], (curr_target_coord[1] + 3 * VEHICLE_WIDTH))
+                new_target_coord = (next_target_coord[0], (curr_target_coord[1] + 1.5 * VEHICLE_WIDTH))
             else:
-                new_target_coord = (next_target_coord[0], (curr_target_coord[1] - 3 * VEHICLE_WIDTH))
+                new_target_coord = (next_target_coord[0], (curr_target_coord[1] - 1.5 * VEHICLE_WIDTH))
         else:
             if next_target_coord[0] - curr_target_coord[0] > 0:
-                new_target_coord = ((curr_target_coord[0] + 3 * VEHICLE_WIDTH), next_target_coord[1])
+                new_target_coord = ((curr_target_coord[0] + 1.5 * VEHICLE_WIDTH), next_target_coord[1])
             else:
-                new_target_coord = ((curr_target_coord[0] - 3 * VEHICLE_WIDTH), next_target_coord[1])
+                new_target_coord = ((curr_target_coord[0] - 1.5 * VEHICLE_WIDTH), next_target_coord[1])
 
         return new_target_coord
     
