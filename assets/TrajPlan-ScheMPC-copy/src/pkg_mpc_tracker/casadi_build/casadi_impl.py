@@ -285,35 +285,8 @@ class CasadiNMPC:
         w = ca.vertcat(X, U)
         w = cast(ca.SX, w) 
 
-        # Slack variable
-        # epsilon_static = ca.SX.sym("epsilon_1", self.N_hor * self._cfg.Nstcobs)
-        # epsilon_dynamic = ca.SX.sym("epsilon_2", self.N_hor * self._cfg.Ndynobs)
-        # w = ca.vertcat(X, U, epsilon_static, epsilon_dynamic)
-        # w = cast(ca.SX, w)
-
-        
-        # lbw = [-ca.inf] * (self.ns * (self.N_hor + 1))
-        # ubw = [ca.inf] * (self.ns * (self.N_hor + 1))
-
         lbw = [-ca.inf] * w.size1()
         ubw = [ca.inf] * w.size1()
-
-        # Add bound for new input constraint
-        # X_offset = 0
-        # U_offset = self.ns * (self.N_hor + 1) # size of x-blcok
-        # e_static_offset = U_offset + self.nu * self.N_hor
-        # e_dynamic_offset = e_static_offset + self.N_hor * self._cfg.Nstcobs
-
-        # for k in range(self.N_hor * self._cfg.Nstcobs):
-        #     lbw[e_static_offset + k] = 0.0
-        #     ubw[e_static_offset + k] = ca.inf
-
-        # for k in range(self.N_hor * self._cfg.Ndynobs):
-        #     lbw[e_dynamic_offset + k] = 0.0
-        #     ubw[e_dynamic_offset + k] = ca.inf
-
-
-
         g: list[ca.SX] = []
         lbg: list[float] = []
         ubg: list[float] = []
@@ -335,23 +308,12 @@ class CasadiNMPC:
             x_k = X[k * self.ns : (k + 1) * self.ns]
             x_kp1 = X[(k + 1) * self.ns : (k + 2) * self.ns]
             u_k = U[k * self.nu : (k + 1) * self.nu]
-            #e_static_k = epsilon_static[k * self._cfg.Nstcobs : (k+1) * self._cfg.Nstcobs]
-            #e_dynamic_k = epsilon_dynamic[k * self._cfg.Ndynobs : (k+1) * self._cfg.Ndynobs]
+
 
             x_hat = self._motion_model(x_k, u_k, self.ts)
             g.append(x_kp1 - x_hat)
             lbg.extend([0.0] * self.ns)
             ubg.extend([0.0] * self.ns)
-
-            # Add slack to g static
-            # g.append(self._static_obstacle_intrusion(x_kp1)-e_static_k)
-            # lbg.extend([-ca.inf] * self._cfg.Nstcobs)
-            # ubg.extend([0.0] * self._cfg.Nstcobs)
-
-            # Add slack to g dynamic
-            # g.append(self._dynamic_obstacle_intrusion(k, x_kp1) - e_dynamic_k)
-            # lbg.extend([-ca.inf] * self._cfg.Ndynobs)
-            # ubg.extend([0.0] * self._cfg.Ndynobs)
 
 
             # Generate objective function J = Jr + Jo + sum(Jf)
@@ -368,10 +330,6 @@ class CasadiNMPC:
             # Add acceleration penalty to the cost/objective function
             total_cost += self._q_terms["acc_penalty"] * acc**2 # ||u_k - u_k-1 || Qa
             total_cost += self._q_terms["w_acc_penalty"] * w_acc**2 # ||u_k - u_k-1 || Qa
-            #total_cost +=  ca.sum1(e_static_k)#1e2 * ca.sum1(e_static_k) + 1e4 * ca.sum1(e_static_k**2)
-            #total_cost +=  ca.sum1(e_dynamic_k)#1e2 * ca.sum1(e_dynamic_k) + 1e4 * ca.sum1(e_dynamic_k**2)
-            # total_cost += rho_stc * ca.sum1(e_static_k**2)
-            # total_cost += rho_dyn * ca.sum1(e_dynamic_k**2)
             # v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
             # v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
             # v = ca.vertcat(v_stc, v_dyn)
