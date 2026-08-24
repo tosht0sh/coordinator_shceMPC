@@ -179,12 +179,12 @@ class CasadiNMPC:
             weight=self._small_weight,
         )
         ### J_O dynamic/static obstacle costs, similar to PANOC implementation.
-        #cts.cost_dynobs = self._dynamic_obstacle_current_cost(k, x_next)
-        #cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
-        #cts.cost_dynobs_pred = self._dynamic_obstacle_cost(k, x_next, self._q_dyn[k])
-        # penalty_constraints_stcobs = self._penalty_weight * self._static_obstacle_intrusion(x_next)
-        # penalty_constraints_dynobs = self._penalty_weight * self._dynamic_obstacle_intrusion(k, x_next)
-        return cts.sum() # + penalty_constraints_stcobs + penalty_constraints_dynobs
+        cts.cost_dynobs = self._dynamic_obstacle_current_cost(k, x_next)
+        cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
+        cts.cost_dynobs_pred = self._dynamic_obstacle_cost(k, x_next, self._q_dyn[k])
+        penalty_constraints_stcobs = self._penalty_weight * self._static_obstacle_intrusion(x_next)
+        penalty_constraints_dynobs = self._penalty_weight * self._dynamic_obstacle_intrusion(k, x_next)
+        return cts.sum() #+ penalty_constraints_stcobs + penalty_constraints_dynobs
 
     def _static_obstacle_cost(self, state: ca.SX, weight: ca.SX) -> ca.SX:
         cost = ca.SX(0.0)
@@ -372,10 +372,10 @@ class CasadiNMPC:
             #total_cost +=  ca.sum1(e_dynamic_k)#1e2 * ca.sum1(e_dynamic_k) + 1e4 * ca.sum1(e_dynamic_k**2)
             # total_cost += rho_stc * ca.sum1(e_static_k**2)
             # total_cost += rho_dyn * ca.sum1(e_dynamic_k**2)
-            #v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
-            #v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
-            #v = ca.vertcat(v_stc, v_dyn)
-            #total_cost += self._rho_pen * ca.dot(v,v)
+            v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
+            v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
+            v = ca.vertcat(v_stc, v_dyn)
+            total_cost += self._rho_pen * ca.dot(v,v)
 
             prev_v = u_k[0]
             prev_w = u_k[1]

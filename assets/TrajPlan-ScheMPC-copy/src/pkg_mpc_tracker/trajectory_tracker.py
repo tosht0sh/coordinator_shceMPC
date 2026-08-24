@@ -444,6 +444,11 @@ class TrajectoryTracker:
                                monitored_cost=monitored_cost)
         return actions, pred_states, ref_states, debug_info
 
+
+    # Two different _run_step!
+    # The first one works for simulation only.
+    # The second one works for hardware only. The reason is that sometimes the robots enters align mode
+    # and starts spinning.
     def _run_step(self, stc_constraints: list, dyn_constraints: list, other_robot_states:Optional[list]=None, report_cost:bool=False, ignore_speed_ref:bool=False):
         """Run the trajectory planner for one step, wrapped by `run_step`.
 
@@ -468,42 +473,57 @@ class TrajectoryTracker:
         finish_state = ref_states[-1,:]
         current_refs = ref_states.reshape(-1).tolist()
 
-        ### Get reference velocities ### 
-        ### Remove the if statement statement entirly to remove slow down before goal
-        # dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
-        # if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
-        #     speed_ref = dist_to_goal / self.N_hor / self.ts * 2
-        #     speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
-        #     speed_ref_list = [speed_ref]*self.N_hor
-        # else:
-        speed_ref_list = [self.base_speed]*self.N_hor
-
-        last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
-
         ### Complementary restrictions for velocity and angular velocity ###
+        # This must run *before* "Get reference velocities" below: it is the only
+        # place that can switch into 'aligning' mode (which zeroes base_speed so a
+        # large heading correction isn't fought by a forward-speed reference), and
+        # speed_ref_list reads self.base_speed. Deciding the mode after computing
+        # speed_ref_list meant aligning's base_speed change always arrived one tick
+        # too late to affect the solve it was decided for -- and since set_ref_states
+        # unconditionally resets the mode to 'work' at the start of every tick, it
+        # never got read at all.
         # speed_decay = 0.0
         current_ref_theta = math.degrees(ref_states[0, 2]) % 360
         current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
         current_theta = math.degrees(self.state[2]) % 360
         theta_diff = float(self.angle_diff(current_ref_theta, current_theta))
         theta_diff_last = float(self.angle_diff(current_ref_theta_last, current_theta))
+        if self.vb:
+            print(f"[AligningDebug-{self.robot_id}] pos=({self.state[0]:.4f},{self.state[1]:.4f}) "
+                  f"current_theta={current_theta:.2f} current_ref_theta={current_ref_theta:.2f} "
+                  f"theta_diff={theta_diff:.2f}")
         # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
         #     self.set_work_mode(mode='aligning')
         # elif theta_diff > 60:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
-        
-        # if theta_diff > 100: # and theta_diff_last > 90:
-        #     self.set_work_mode(mode='aligning')
-        #     if not ignore_speed_ref:
-        #         # Large heading errors are better handled as an in-place alignment
-        #         # problem; asking for forward travel here tends to produce arcs/spins.
-        #         speed_ref_list = [0.0] * self.N_hor
-        # else:
-        #     self.set_work_mode(mode='work', use_predefined_speed=False)
+
+        # Hysteresis: enter 'aligining' at a large error (100 degrees) but only leave
+        # it once the correction is essentially complete (20 degrees) -- a single
+        # symmetric threshold let the heading hover right around 100 degrees
+        # indefinitely instead of ever finishing the turn.
+        aligning_exit_theta = 20
+        if self._mode == 'aligning':
+            if theta_diff < aligning_exit_theta:
+                self.set_work_mode(mode='work', use_predefined_speed=False)
+        elif theta_diff > 100:  # and theta_diff_last > 90:
+            self.set_work_mode(mode='aligning')
+        else:
+            self.set_work_mode(mode='work', use_predefined_speed=False)
+
+        ### Get reference velocities ###
+        dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
+        if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
+            speed_ref = dist_to_goal / self.N_hor / self.ts * 2
+            speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
+            speed_ref_list = [speed_ref]*self.N_hor
+        else:
+            speed_ref_list = [self.base_speed]*self.N_hor
+
+        last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
 
         ### Check if turning around ###
-        mid_idx = min(3, self.N_hor - 1)
+        mid_idx = 0
         ref_theta_diff = float(self.angle_diff(current_ref_theta, current_ref_theta_last))
         if (ref_theta_diff > 170):
             all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
@@ -511,7 +531,6 @@ class TrajectoryTracker:
             try:
                 turn_idx = np.where(all_theta_diffs>170)[0][0]
             except IndexError:
-                print(f"mid_ixs {mid_idx}, turn_idx {turn_idx}")
                 turn_idx = self.N_hor - 1 # if no turn found, use the last index
             if turn_idx < mid_idx: # prioritize turning around
                 current_refs = np.vstack(( np.tile(ref_states[[turn_idx], :], (turn_idx+1, 1)), ref_states[turn_idx+1:, :] )).reshape(-1).tolist()
@@ -552,6 +571,116 @@ class TrajectoryTracker:
         # self._init_guess = [x for x in u] # use the last u as initial guess for next step
 
         return actions, pred_states, np.array(current_refs).reshape(self.N_hor, self.ns) , cost, monitored_costs
+
+
+    # def _run_step(self, stc_constraints: list, dyn_constraints: list, other_robot_states:Optional[list]=None, report_cost:bool=False, ignore_speed_ref:bool=False):
+    #     """Run the trajectory planner for one step, wrapped by `run_step`.
+
+    #     Args:
+    #         other_robot_states: A list with length "ns*N_hor*Nother" (E.x. [0,0,0] * (self.N_hor*self.config.Nother)). Defaults to None.
+
+    #     Raises:
+    #         RuntimeError: If the solver cannot be run.
+
+    #     Returns:
+    #         actions: A list of future actions
+    #         pred_states: A list of predicted states
+    #         ref_states: Reference states
+    #         cost: The cost of the predicted trajectory
+    #         monitored_costs: The monitored costs if the monitor is on
+    #     """
+    #     if other_robot_states is None:
+    #         other_robot_states = [-10] * (self.ns*(self.N_hor+1)*self.config.Nother)
+
+    #     ### Get reference states ###
+    #     ref_states = self._unwrap_reference_states(self.ref_states.copy())
+    #     finish_state = ref_states[-1,:]
+    #     current_refs = ref_states.reshape(-1).tolist()
+
+    #     ### Get reference velocities ### 
+    #     ### Remove the if statement statement entirly to remove slow down before goal
+    #     # dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
+    #     # if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
+    #     #     speed_ref = dist_to_goal / self.N_hor / self.ts * 2
+    #     #     speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
+    #     #     speed_ref_list = [speed_ref]*self.N_hor
+    #     # else:
+    #     speed_ref_list = [self.base_speed]*self.N_hor
+
+    #     last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
+
+    #     ### Complementary restrictions for velocity and angular velocity ###
+    #     # speed_decay = 0.0
+    #     current_ref_theta = math.degrees(ref_states[0, 2]) % 360
+    #     current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
+    #     current_theta = math.degrees(self.state[2]) % 360
+    #     theta_diff = float(self.angle_diff(current_ref_theta, current_theta))
+    #     theta_diff_last = float(self.angle_diff(current_ref_theta_last, current_theta))
+    #     # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
+    #     #     self.set_work_mode(mode='aligning')
+    #     # elif theta_diff > 60:
+    #     #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
+    #     #     self.set_work_mode(mode='work', use_predefined_speed=False)
+        
+    #     # if theta_diff > 100: # and theta_diff_last > 90:
+    #     #     self.set_work_mode(mode='aligning')
+    #     #     if not ignore_speed_ref:
+    #     #         # Large heading errors are better handled as an in-place alignment
+    #     #         # problem; asking for forward travel here tends to produce arcs/spins.
+    #     #         speed_ref_list = [0.0] * self.N_hor
+    #     # else:
+    #     #     self.set_work_mode(mode='work', use_predefined_speed=False)
+
+    #     ### Check if turning around ###
+    #     mid_idx = min(3, self.N_hor - 1)
+    #     ref_theta_diff = float(self.angle_diff(current_ref_theta, current_ref_theta_last))
+    #     if (ref_theta_diff > 170):
+    #         all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
+    #         all_theta_diffs = self.angle_diff(all_ref_thetas, current_theta)
+    #         try:
+    #             turn_idx = np.where(all_theta_diffs>170)[0][0]
+    #         except IndexError:
+    #             print(f"mid_ixs {mid_idx}, turn_idx {turn_idx}")
+    #             turn_idx = self.N_hor - 1 # if no turn found, use the last index
+    #         if turn_idx < mid_idx: # prioritize turning around
+    #             current_refs = np.vstack(( np.tile(ref_states[[turn_idx], :], (turn_idx+1, 1)), ref_states[turn_idx+1:, :] )).reshape(-1).tolist()
+    #             self.set_work_mode(mode='aligning')
+    #         else: # prioritize going straight
+    #             current_refs = np.vstack(( ref_states[:turn_idx, :], np.tile(ref_states[[turn_idx], :], (self.N_hor-turn_idx, 1)) )).reshape(-1).tolist()
+    #     assert len(current_refs) == self.ns * self.N_hor, f"Reference states should have {self.ns * self.N_hor} elements, got {len(current_refs)}."
+            
+    #     ### Assemble parameters for solver & Run MPC ###
+    #     params = list(last_u) + list(self.state) + list(finish_state) + self.tuning_params + \
+    #              current_refs + speed_ref_list + other_robot_states + \
+    #              stc_constraints + dyn_constraints + self.stc_weights + self.dyn_weights
+
+    #     try:
+    #         # self.solver_debug(stc_constraints) # use to check (visualize) the environment
+    #         taken_states, pred_states, actions, cost, solver_time, exit_status, u = self.run_solver(params, self.state, self.config.action_steps, initial_guess=self._init_guess)
+    #         # actions = [x*np.array([1.0-speed_decay, 1.0]) for x in actions]
+    #         if exit_status in self.config.bad_exit_codes and self.vb:
+    #             print(f"[{self.__class__.__name__}-{self.robot_id}] Bad converge status: {exit_status}")
+    #     except RuntimeError:
+    #         if self.use_tcp:
+    #             self.mng.kill()
+    #         raise RuntimeError(f"[{self.__class__.__name__}-{self.robot_id}] Cannot run solver.")
+        
+    #     monitored_costs = None
+    #     if self.monitor_on and self.cost_monitor is not None:
+    #         monitored_costs = self.cost_monitor.get_cost(self.state, params, u, report=report_cost)
+
+    #     assert isinstance(cost, float)
+    #     assert isinstance(actions, list)
+    #     assert isinstance(pred_states, list)
+    #     self.past_states.append(self.state)
+    #     self.past_states += taken_states[:-1]
+    #     self.past_actions += actions
+    #     self.state = taken_states[-1]
+    #     self.cost_timelist.append(cost)
+    #     self.solver_time_timelist.append(solver_time)
+    #     # self._init_guess = [x for x in u] # use the last u as initial guess for next step
+
+    #     return actions, pred_states, np.array(current_refs).reshape(self.N_hor, self.ns) , cost, monitored_costs
 
     def run_solver(self, parameters:list, state: np.ndarray, take_steps:int=1, initial_guess:Optional[list]=None):
         """Run the solver for the pre-defined MPC problem.
