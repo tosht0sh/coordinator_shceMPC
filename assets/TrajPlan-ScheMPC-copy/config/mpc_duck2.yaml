@@ -1,0 +1,77 @@
+# This constitutes the default configuration file for the mpc-generator. 
+# Reference:  Trajectory Generation for Mobile Robots in a Dynamic Environment using Nonlinear Model Predictive Control. [CASE2021]
+################################################################################
+
+### System configuration
+ts: 0.2   # Size of the time-step (sampling time)
+
+### MPC configuration
+N_hor: 10 #10       # The length of the receding horizon controller
+action_steps: 1  # How many steps should be taken from each mpc-solution. Range (1 - N_hor)
+# Helper variables (Generally does not have to be changed)
+nu: 2     # Number of control inputs (speed and angular speed)
+ns: 3     # Number of states for the robot (x,y,theta,e) [e is the channel width/permitted error, not included yet]
+nq: 10    # Number of optimization penalties
+Nother:  2  # Number of other robots modelled by the MPC (set to n_bots-1 for your scenario)
+Nstcobs: 10  # Maximal number of static obstacles
+nstcobs: 12  # Number of variables per obstacles, (4 edges * 3 per edge)
+Ndynobs: 15  # Maximal number of dynamic obstacles
+ndynobs: 6   # Number of variables per dynamic obstacle
+# Penalty weights
+lin_vel_penalty: 0.25      # Penalizes speed magnitude |v|. Lower if timid, higher if it rushes.
+lin_acc_penalty: 0.125     # Penalizes dv/dt. Increase for forward/backward dithering or jerky starts.
+ang_vel_penalty: 0.0     # Penalizes angular speed |w|. Increase only if turns are too aggressive overall.
+ang_acc_penalty: 0.001 #0.04      # Penalizes dw/dt. Increase for smoother turning, decrease for faster yaw response.
+qrpd: 20.0 #0.75              # Path-shape term. Increase to hug the corridor/edges more closely.
+qpos: 0.1               # Point-tracking term. Increase to hit the next ref point harder; too high can cut corners.
+qvel: 0.0 #0.075 # 1.0               # Speed-reference term on (v - v_ref)^2, not a generic "speed is bad" penalty.
+qtheta: 2.0 #2.0             # Heading term. Increase for stronger turning, decrease if it snakes.
+# Obstacle avoidance weights
+qstcobs: 0.0 #10.0         # Static obstacle soft cost. Increase if wall clearance is too small.
+qdynobs: 0.0 #10.0          # Predicted dynamic obstacle soft cost. Increase if it cuts too close to moving agents.
+# Terminal weights
+qpN: 0.0 #0.025                # Terminal position term. Use to tighten final goal capture, not mid-path behavior.
+qthetaN: 0.0            # Terminal heading term. Use when the final orientation matters at the goal.
+# Building options in the optimizer
+solver_type: 'Casadi'
+max_solver_time: 100_000        # micros (0.1 sec)
+build_type: 'release'           # Can have 'debug' or 'release'
+build_directory: 'mpc_solver'   # Name of the directory where the build is created
+bad_exit_codes: ["NotConvergedIterations", "NotConvergedOutOfTime"] # Optimizer specific names, otherwise "Converged"
+optimizer_name: 'navi_fast'    # optimizer name
+
+ # qrpd =1.25, acc_pen 0.25, q_theta = 20 good
+ # qrpd =1.0, acc_pen 0.25, q_theta = 1 good
+
+# Quick tuning guide for this Casadi MPC:
+
+# - Cuts corners / leaves the blue path: increase qrpd first; 
+# if it still point-chases, reduce qpos a bit.
+
+# - Turn too little / reacts too late: increase qtheta; 
+# if it still cannot turn, check ang_vel_max in robot_spec.yaml.
+
+# - Over-corrects / snakes / oscillates in heading: 
+# decrease qtheta or increase ang_acc_penalty.
+# ((w_k-w_{k-1})/ts)^2. 
+# That means each step change in w costs about 50*(Δw)^2
+
+# - Hesitates or flips between forward/backward: 
+# increase lin_acc_penalty; if reverse is unwanted, 
+# set lin_vel_min: 0.0 in robot_spec.yaml.
+# - Too slow on straights: increase qvel or decrease lin_vel_penalty.
+# he unconstrained best speed is
+# v* = qvel / (qvel + lin_vel_penalty) * v_ref
+
+# - Reaches the goal area but finishes with poor pose: 
+# increase qpN and qthetaN.
+
+# Interactions to remember:
+# - qpos tracks the next reference point, 
+#   qrpd tracks the path geometry between points.
+
+# - qtheta versus ang_acc_penalty is the main "sharp turn" versus
+#   "smooth turn" tradeoff.
+
+# - qvel pulls v toward the reference speed, 
+#   while lin_vel_penalty pushes |v| down toward zero.

@@ -4,6 +4,7 @@ from timeit import default_timer as timer
 import casadi as ca # type: ignore
 
 from .casadi_build import mpc_cost as mc
+from .casadi_build import mpc_helper as mh
 from .casadi_build.mpc_cost import CostTerms
 
 from configs import MpcConfiguration, CircularRobotSpecification
@@ -120,7 +121,7 @@ class CostMonitor:
         }
 
         self.ref_states = ca.reshape(self._r_s, (self._cfg.ns, self._cfg.N_hor))
-        self.ref_states = ca.horzcat(self.ref_states, self.ref_states[:,[-1]])[:2, :]
+        self.ref_states = ca.horzcat(self.ref_states, self.ref_states[:,[-1]])
         other_x_0 = self._c_0[ ::self._cfg.ns] # first  state
         other_y_0 = self._c_0[1::self._cfg.ns] # second state
         self.other_robots_0 = ca.hcat([other_x_0, other_y_0]).T
@@ -164,7 +165,8 @@ class CostMonitor:
             state, step_cost = self._get_step_cost(kt, ca.SX(state))
             step_cost_list.append(step_cost)
             total_cost += step_cost
-        terminal_cost = self._q_terms['posN']*((state[0]-self._s_N[0])**2 + (state[1]-self._s_N[1])**2) + self._q_terms['thetaN']*(state[2]-self._s_N[2])**2 # terminated cost
+        theta_terminal_err = mh.angle_error(state[2], self._s_N[2])
+        terminal_cost = self._q_terms['posN']*((state[0]-self._s_N[0])**2 + (state[1]-self._s_N[1])**2) + self._q_terms['thetaN']*theta_terminal_err**2 # terminated cost
         terminal_cost = float(terminal_cost)
 
         v = self._u[0::2] # velocity
@@ -197,6 +199,7 @@ class CostMonitor:
         final_cost = total_cost.sum_values()+terminal_cost+cost_acc+cost_w_acc
         print("-"*20)
         print(f"Cost report{prt_obj_info} - Runtime {round(self.runtime, 3)} sec - Total cost {round(float(final_cost), 4)}:")
+        print(f"  - Ref position deviation: {total_cost.cost_pos}")
         print(f"  - Ref path deviation: {total_cost.cost_rpd}")
         print(f"  - Ref velocity deviation: {total_cost.cost_rvd}")
         print(f"  - Input cost: {total_cost.cost_input}")
@@ -213,6 +216,7 @@ class CostMonitor:
             print(f"Step cost report:")
             for i, step_cost in enumerate(step_cost_list):
                 print(f"  Step {i}:")
+                print(f"    - Ref position deviation: {step_cost.cost_pos}")
                 print(f"    - Ref path deviation: {step_cost.cost_rpd}")
                 print(f"    - Ref velocity deviation: {step_cost.cost_rvd}")
                 print(f"    - Input cost: {step_cost.cost_input}")

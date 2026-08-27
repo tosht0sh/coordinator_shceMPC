@@ -48,8 +48,8 @@ class CasadiNMPC:
     - Obstacle terms are included as soft costs; hard constraints can be added as TODO.
     """
 
-    _large_weight = 1000.0 # 1000
-    _small_weight = 10.0 # 10
+    _large_weight = 1.0 # 1000
+    _small_weight = 0.5 # 10
     _critical_step = 100
     _penalty_weight = 10.0 # Modelling parameter, can be changed!
 
@@ -136,28 +136,40 @@ class CasadiNMPC:
         y0 = self._c_0[1:: self.ns]
         return ca.hcat([x0, y0]).T
 
+    @staticmethod
+    def _wrapped_angle_error(theta: ca.SX, theta_ref: ca.SX) -> ca.SX:
+        """Return the shortest signed angular difference in [-pi, pi]."""
+
+        delta = theta - theta_ref
+        return ca.atan2(ca.sin(delta), ca.cos(delta))
+
     def _stage_cost(self, k: int, x_next: ca.SX, u_k: ca.SX, ref_states: ca.SX) -> ca.SX:
         """Per-step cost. Mirrors PanocBuilder terms as soft penalties."""
         cts = mc.CostTerms()
+        theta_err = mh.angle_error(x_next[2], ref_states[2, 0])
 
         ### Reference deviation costs J_R =||s_k- s(tilde)_k ||*Qs + ||u_k - u(tilde)_k||
         ### the term ||u_k - u_k-1 || is performed in build().
+        cts.cost_pos = self._q_terms["pos"] * (
+            (x_next[0] - ref_states[0, 0]) ** 2 + (x_next[1] - ref_states[1, 0]) ** 2
+        )
         cts.cost_rpd = mc.cost_refpath_deviation(x_next, ref_states[:2, :], weight=self._q_terms["rpd"]) # state in x,y
         cts.cost_rvd = self._q_terms["vel"] * (u_k[0] - self._r_v[k]) ** 2 # control action term
-        cts.cost_rtd = self._q_terms["theta"] * (x_next[2] - ref_states[2, 0]) ** 2 # state in theta
+        theta_error = self._wrapped_angle_error(x_next[2], ref_states[2, 0])
+        cts.cost_rtd = self._q_terms["theta"] * theta_error**2 # state in theta
         cts.cost_input = ca.sum1(ca.vertcat(self._q_terms["v"], self._q_terms["w"]) * u_k**2) # ||u_k||Q_u
 
         ### Fleet collision avoidance: J_f =  max(0,Q_f * (d_fleet - distance))**2
         ### used from mpc_cost, cost_fleet_collision.
-        # safe_distance = 1 * (self._spec.vehicle_width + self._spec.vehicle_margin)
-        # critical_distance = 1 * self._spec.vehicle_width + self._spec.vehicle_margin
-        # if k < self._critical_step:
-        #     cts.cost_fleet = mc.cost_fleet_collision(
-        #         x_next[:2],
-        #         self._other_robots_current(),
-        #         safe_distance=critical_distance,
-        #         weight=self._large_weight,
-        #     )
+        safe_distance = 0.1 #2 * (self._spec.vehicle_width + self._spec.vehicle_margin)
+        critical_distance = 0.05 #2 * self._spec.vehicle_width + self._spec.vehicle_margin
+        if k < self._critical_step:
+            cts.cost_fleet = mc.cost_fleet_collision(
+                x_next[:2],
+                self._other_robots_current(),
+                safe_distance=critical_distance,
+                weight=self._large_weight,
+            )
 
         # ## Fleet collision avoidance [Predictive]
         # cts.cost_fleet_pred = mc.cost_fleet_collision(
@@ -168,7 +180,7 @@ class CasadiNMPC:
         # )
         ### J_O dynamic/static obstacle costs, similar to PANOC implementation.
         #cts.cost_dynobs = self._dynamic_obstacle_current_cost(k, x_next)
-        cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
+        #cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
         #cts.cost_dynobs_pred = self._dynamic_obstacle_cost(k, x_next, self._q_dyn[k])
         # penalty_constraints_stcobs = self._penalty_weight * self._static_obstacle_intrusion(x_next)
         # penalty_constraints_dynobs = self._penalty_weight * self._dynamic_obstacle_intrusion(k, x_next)
@@ -273,35 +285,8 @@ class CasadiNMPC:
         w = ca.vertcat(X, U)
         w = cast(ca.SX, w) 
 
-        # Slack variable
-        # epsilon_static = ca.SX.sym("epsilon_1", self.N_hor * self._cfg.Nstcobs)
-        # epsilon_dynamic = ca.SX.sym("epsilon_2", self.N_hor * self._cfg.Ndynobs)
-        # w = ca.vertcat(X, U, epsilon_static, epsilon_dynamic)
-        # w = cast(ca.SX, w)
-
-        
-        # lbw = [-ca.inf] * (self.ns * (self.N_hor + 1))
-        # ubw = [ca.inf] * (self.ns * (self.N_hor + 1))
-
         lbw = [-ca.inf] * w.size1()
         ubw = [ca.inf] * w.size1()
-
-        # Add bound for new input constraint
-        # X_offset = 0
-        # U_offset = self.ns * (self.N_hor + 1) # size of x-blcok
-        # e_static_offset = U_offset + self.nu * self.N_hor
-        # e_dynamic_offset = e_static_offset + self.N_hor * self._cfg.Nstcobs
-
-        # for k in range(self.N_hor * self._cfg.Nstcobs):
-        #     lbw[e_static_offset + k] = 0.0
-        #     ubw[e_static_offset + k] = ca.inf
-
-        # for k in range(self.N_hor * self._cfg.Ndynobs):
-        #     lbw[e_dynamic_offset + k] = 0.0
-        #     ubw[e_dynamic_offset + k] = ca.inf
-
-
-
         g: list[ca.SX] = []
         lbg: list[float] = []
         ubg: list[float] = []
@@ -323,23 +308,12 @@ class CasadiNMPC:
             x_k = X[k * self.ns : (k + 1) * self.ns]
             x_kp1 = X[(k + 1) * self.ns : (k + 2) * self.ns]
             u_k = U[k * self.nu : (k + 1) * self.nu]
-            #e_static_k = epsilon_static[k * self._cfg.Nstcobs : (k+1) * self._cfg.Nstcobs]
-            #e_dynamic_k = epsilon_dynamic[k * self._cfg.Ndynobs : (k+1) * self._cfg.Ndynobs]
+
 
             x_hat = self._motion_model(x_k, u_k, self.ts)
             g.append(x_kp1 - x_hat)
             lbg.extend([0.0] * self.ns)
             ubg.extend([0.0] * self.ns)
-
-            # Add slack to g static
-            # g.append(self._static_obstacle_intrusion(x_kp1)-e_static_k)
-            # lbg.extend([-ca.inf] * self._cfg.Nstcobs)
-            # ubg.extend([0.0] * self._cfg.Nstcobs)
-
-            # Add slack to g dynamic
-            # g.append(self._dynamic_obstacle_intrusion(k, x_kp1) - e_dynamic_k)
-            # lbg.extend([-ca.inf] * self._cfg.Ndynobs)
-            # ubg.extend([0.0] * self._cfg.Ndynobs)
 
 
             # Generate objective function J = Jr + Jo + sum(Jf)
@@ -356,10 +330,6 @@ class CasadiNMPC:
             # Add acceleration penalty to the cost/objective function
             total_cost += self._q_terms["acc_penalty"] * acc**2 # ||u_k - u_k-1 || Qa
             total_cost += self._q_terms["w_acc_penalty"] * w_acc**2 # ||u_k - u_k-1 || Qa
-            #total_cost +=  ca.sum1(e_static_k)#1e2 * ca.sum1(e_static_k) + 1e4 * ca.sum1(e_static_k**2)
-            #total_cost +=  ca.sum1(e_dynamic_k)#1e2 * ca.sum1(e_dynamic_k) + 1e4 * ca.sum1(e_dynamic_k**2)
-            # total_cost += rho_stc * ca.sum1(e_static_k**2)
-            # total_cost += rho_dyn * ca.sum1(e_dynamic_k**2)
             # v_stc = ca.fmax(0,ca.vertcat(self._static_obstacle_intrusion(x_kp1)))
             # v_dyn = ca.fmax(0, self._dynamic_obstacle_intrusion(k, x_kp1))
             # v = ca.vertcat(v_stc, v_dyn)
@@ -369,8 +339,10 @@ class CasadiNMPC:
             prev_w = u_k[1]
 
         x_N = X[self.N_hor * self.ns : (self.N_hor + 1) * self.ns]
+        theta_terminal_err = mh.angle_error(x_N[2], self._s_N[2])
         total_cost += self._q_terms["posN"] * ((x_N[0] - self._s_N[0]) ** 2 + (x_N[1] - self._s_N[1]) ** 2)
-        total_cost += self._q_terms["thetaN"] * (x_N[2] - self._s_N[2]) ** 2
+        theta_terminal_error = self._wrapped_angle_error(x_N[2], self._s_N[2])
+        total_cost += self._q_terms["thetaN"] * theta_terminal_error**2
 
         for k in range(self.N_hor):
             uk_start = self.ns * (self.N_hor + 1) + k * self.nu
@@ -418,58 +390,6 @@ class CasadiNMPC:
         return x_shift + u_shift
 
 
-    # @staticmethod
-    # def shift_warm_start(
-    #     w_opt: list[float],
-    #     ns: int,
-    #     nu: int,
-    #     N: int,
-    #     n_stcobs: int = 0,
-    #     n_dynobs: int = 0,
-    # ) -> list[float]:
-    #     """Shift warm start for `w = [X, U, eps_static, eps_dynamic]`.
-
-    #     If no slack variables are used, keep `n_stcobs=n_dynobs=0` and the function
-    #     reduces to the old `[X, U]` behavior.
-    #     """
-    #     x_size = ns * (N + 1)
-    #     u_size = nu * N
-    #     eps_stc_size = N * n_stcobs
-    #     eps_dyn_size = N * n_dynobs
-    #     expected_size = x_size + u_size + eps_stc_size + eps_dyn_size
-    #     if len(w_opt) != expected_size:
-    #         raise ValueError(
-    #             "Warm-start vector size mismatch: "
-    #             f"got {len(w_opt)}, expected {expected_size} "
-    #             f"(ns={ns}, nu={nu}, N={N}, n_stcobs={n_stcobs}, n_dynobs={n_dynobs})."
-    #         )
-
-    #     x = w_opt[:x_size]
-    #     u_start = x_size
-    #     u_end = u_start + u_size
-    #     u = w_opt[u_start:u_end]
-
-    #     eps_stc_start = u_end
-    #     eps_stc_end = eps_stc_start + eps_stc_size
-    #     eps_stc = w_opt[eps_stc_start:eps_stc_end]
-
-    #     eps_dyn = w_opt[eps_stc_end:eps_stc_end + eps_dyn_size]
-
-    #     x_shift = x[ns:] + x[-ns:]
-    #     u_shift = u[nu:] + u[-nu:]
-
-    #     # Shift slacks one stage and repeat the last stage values.
-    #     if n_stcobs > 0:
-    #         eps_stc_shift = eps_stc[n_stcobs:] + eps_stc[-n_stcobs:]
-    #     else:
-    #         eps_stc_shift = []
-    #     if n_dynobs > 0:
-    #         eps_dyn_shift = eps_dyn[n_dynobs:] + eps_dyn[-n_dynobs:]
-    #     else:
-    #         eps_dyn_shift = []
-
-    #     return x_shift + u_shift + eps_stc_shift + eps_dyn_shift
-
     def pack_parameters(
         self,
         u_m1: Sequence[float],
@@ -503,5 +423,3 @@ class CasadiNMPC:
         extend(q_dyn)
         extend(([rho_pen]))
         return p
-
-    # TODO: once this skeleton is validated, connect it to `trajectory_tracker.run_solver` for solver_type == "Casadi".

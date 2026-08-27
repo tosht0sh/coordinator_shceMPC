@@ -63,8 +63,8 @@ class WheelEncoderReaderNode(DTROS):
         self.right_enc_resolution = None
         self.right_meters_per_tick = None
 
-        self.x = 0.0
-        self.y = 0.0
+        self.x = 2.0
+        self.y = 2.0
         self.theta = 0.0
 
         self.prev_l = None

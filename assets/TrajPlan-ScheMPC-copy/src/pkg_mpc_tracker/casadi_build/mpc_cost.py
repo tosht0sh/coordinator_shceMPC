@@ -10,6 +10,7 @@ from .mpc_helper import *
 
 @dataclass
 class CostTerms:
+    cost_pos: ca.SX = cs.SX(0.0)
     cost_rpd: ca.SX = cs.SX(0.0)
     cost_rvd: ca.SX = cs.SX(0.0)
     cost_rtd: ca.SX = cs.SX(0.0)
@@ -106,6 +107,7 @@ def cost_fleet_collision(state: ca.SX, points: ca.SX, safe_distance: float, weig
         Only have cost when the distance is smaller than `safe_distance`.
     """
     cost:ca.SX = weight * ca.sum2(ca.fmax(0.0, safe_distance**2 - dist_to_points_square(state, points)))
+    # print("I'm colliding!")
     assert cost.shape == (1,1)
     return cost
 
@@ -126,6 +128,5 @@ def cost_refpath_deviation(state: ca.SX, line_segments: ca.SX, weight:Union[ca.S
     cost:ca.SX = ca.mmin(distances_sqrt[1:]) * weight
     assert cost.shape == (1,1)
     return cost
-
 
 

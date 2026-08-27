@@ -35,7 +35,7 @@ SCHEDULE_VARIANT = os.getenv("MPC_SCHEDULE_VARIANT", "SingleRobot")
 SEND_MAP = os.getenv("MPC_SEND_MAP", "1").strip().lower() in {"1", "true", "yes", "on"}
 DISPATCH_TIMEOUT = float(os.getenv("MPC_DISPATCH_TIMEOUT", "5.0"))
 DEFAULT_BOT_PORT = int(os.getenv("MPC_DEFAULT_BOT_PORT", "5007"))
-DEFAULT_BOT_HOST = os.getenv("MPC_DEFAULT_BOT_HOST", "")
+DEFAULT_BOT_HOST = os.getenv("MPC_DEFAULT_BOT_HOST", "192.168.1.11")
 
 
 
@@ -69,6 +69,10 @@ def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path,
         "Original": ("schedule.csv", "robot_start.json"),
         "SingleRobot": ("schedule_SingleRobot.csv", "robot_start_SingleRobot.json"),
         "TwoRobots": ("schedule_TwoRobots.csv", "robot_start_TwoRobots.json"),
+        "MultiRobot": ("schedule_MultiRobots.csv", "robot_start_MultiRobots.json"),
+        "CoordScene1": ("schedule_CoordScene1.csv", "robot_start_CoordScene1.json"),
+        "CoordScene2": ("schedule_CoordScene2.csv", "robot_start_CoordScene2.json"),
+        "CoordScene3": ("schedule_CoordScene3.csv", "robot_start_CoordScene3.json"),
     }
     schedule_name, start_name = mapping.get(variant, mapping["SingleRobot"])
     return data_dir / schedule_name, data_dir / start_name
@@ -137,7 +141,7 @@ class SchedulerDispatcher:
         map_packet = self.build_map_packet()
         for robot_id in self.robot_ids:
             rid = str(robot_id)
-            # host = "192.168.1.102" # Robots ip
+            # host = "192.168.1.14" # Robots ip
             # port = 5007
             host, port = self._endpoint_for(rid)
 

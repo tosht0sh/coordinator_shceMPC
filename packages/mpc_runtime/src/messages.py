@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional, Union
 
 
 JsonDict = Dict[str, Any]
-PacketType = Union["MapPacket", "SchedulePacket", "TelemetryPacket", "StatusPacket", "NeighborStatesPacket"]
+PacketType = Union["MapPacket", "SchedulePacket", "TelemetryPacket", "StatusPacket",
+                    "NeighborStatesPacket", "CoordinatorModePacket"]
 
 
 
@@ -32,7 +33,7 @@ def _float_3d(groups: List[Any]) -> List[List[List[float]]]:
 
 @dataclass
 class MapPacket:
-    """Map payload sent from laptop to bot for onboard replanning."""
+    """Map data message sent from laptop to bot for onboard replanning."""
 
     map_id: str
     boundary_coords: List[List[float]]
@@ -53,7 +54,7 @@ class MapPacket:
 
 @dataclass
 class SchedulePacket:
-    """Robot-specific path and timing payload sent from laptop to bot."""
+    """Robot-specific path and timing data sent from laptop to bot."""
 
     robot_id: str
     schedule_id: str
@@ -121,7 +122,7 @@ class TelemetryPacket:
 class NeighborStatesPacket:
     """Laptop-to-bot packet carrying the latest known trajectories of the other robots.
 
-    The payload is already flattened to the exact shape expected by the MPC solver:
+    The data is already flattened to the exact shape expected by the MPC solver:
     `ns * (N_hor + 1) * Nother`.
     """
 
@@ -170,6 +171,28 @@ class StatusPacket:
             schedule_id=str(payload.get("schedule_id", "schedule-default")),
         )
 
+@dataclass
+class CoordinatorModePacket:
+    robot_id: str
+    mode: str
+    sequence: int
+    sent_at: float
+    target_coord: Optional[List[float]] = None
+    kind: str = field(init=False, default="coordinator_mode")
+
+    def to_payload(self) -> JsonDict:
+        return asdict(self)
+
+    @classmethod
+    def from_payload(cls, payload: JsonDict) -> "CoordinatorModePacket":
+        target_coord = payload.get("target_coord")
+        return cls(
+            robot_id=str(payload["robot_id"]),
+            mode=str(payload["mode"]),
+            sequence=int(payload.get("sequence", 0)),
+            sent_at=float(payload.get("sent_at", 0.0)),
+            target_coord=None if target_coord is None else _float_list(target_coord),
+        )
 
 
 def packet_from_payload(payload: JsonDict) -> PacketType:
@@ -184,6 +207,8 @@ def packet_from_payload(payload: JsonDict) -> PacketType:
         return NeighborStatesPacket.from_payload(payload)
     if kind == "status":
         return StatusPacket.from_payload(payload)
+    if kind == "coordinator_mode":
+        return CoordinatorModePacket.from_payload(payload)
     raise ValueError(f"Unsupported packet kind: {kind}")
 
 

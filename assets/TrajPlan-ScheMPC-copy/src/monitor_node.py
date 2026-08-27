@@ -14,9 +14,11 @@ network plumbing.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import pathlib
+import shutil
 import socket
 import sys
 import time
@@ -37,10 +39,12 @@ for path in (TRAJPLAN_SRC, MPC_RUNTIME_SRC):
 
 from basic_motion_model.motion_model import UnicycleModel
 from configs import CircularRobotSpecification, MpcConfiguration
-from messages import NeighborStatesPacket, TelemetryPacket, packet_from_json, packet_to_wire
+from messages import NeighborStatesPacket, TelemetryPacket, CoordinatorModePacket, packet_from_json, packet_to_wire
 from pkg_motion_plan.global_path_coordinate import GlobalPathCoordinator
 from visualizer.mpc_plot import MpcPlotInLoop
 from visualizer.object import CircularVehicleVisualizer
+
+from coordinator.coordinator import Coordinator, CROSSING_RELEASE_RADIUS
 
 
 DATA_NAME = os.getenv("MPC_DATA_NAME", "schedule_demo2_data")
@@ -53,9 +57,23 @@ NEIGHBOR_PORT = int(os.getenv("MPC_NEIGHBOR_PORT", "5009"))
 DEFAULT_BOT_PORT = int(os.getenv("MPC_DEFAULT_BOT_PORT", "5007"))
 MONITOR_AUTORUN = os.getenv("MPC_MONITOR_AUTORUN", "1").strip().lower() in {"1", "true", "yes", "on"}
 MAP_ONLY = os.getenv("MPC_MONITOR_MAP_ONLY", "1").strip().lower() in {"1", "true", "yes", "on"}
-SHADOW_SIM = os.getenv("MPC_SHADOW_SIM", "1").strip().lower() in {"1", "true", "yes", "on"}
+SHADOW_SIM = False #os.getenv("MPC_SHADOW_SIM", "1").strip().lower() in {"1", "true", "yes", "on"}
 OUTPUT_CSV = os.getenv("MPC_MONITOR_ACTUAL_CSV", "Actual_monitor.csv")
+MONITOR_LOG_CSV = os.getenv("MPC_MONITOR_LOG_CSV", "monitor_log.csv")
 IDLE_TIMEOUT = float(os.getenv("MPC_MONITOR_IDLE_TIMEOUT", "0.1"))
+
+COORDINATOR_PORT = int(os.getenv("COORDINATOR_PORT", "5010"))
+MONITOR_LOG_FIELDS = [
+    "robot_id",
+    "schedule_id",
+    "t",
+    "x",
+    "y",
+    "theta",
+    "v",
+    "w",
+    "target_node_id",
+]
 
 
 def _load_endpoint_map() -> Dict[str, Tuple[str, int]]:
@@ -89,9 +107,25 @@ def _schedule_paths(data_dir: pathlib.Path, variant: str) -> Tuple[pathlib.Path,
         "Original": ("schedule.csv", "robot_start.json"),
         "SingleRobot": ("schedule_SingleRobot.csv", "robot_start_SingleRobot.json"),
         "TwoRobots": ("schedule_TwoRobots.csv", "robot_start_TwoRobots.json"),
+        "MultiRobot": ("schedule_MultiRobots.csv", "robot_start_MultiRobots.json"),
+        "CoordScene1": ("schedule_CoordScene1.csv", "robot_start_CoordScene1.json"),
+        "CoordScene2": ("schedule_CoordScene2.csv", "robot_start_CoordScene2.json"),
+        "CoordScene3": ("schedule_CoordScene3.csv", "robot_start_CoordScene3.json"),
     }
     schedule_name, start_name = mapping.get(variant, mapping["SingleRobot"])
     return data_dir / schedule_name, data_dir / start_name
+
+
+def _next_experiment_run_dir(root_dir: pathlib.Path) -> pathlib.Path:
+    root_dir.mkdir(parents=True, exist_ok=True)
+    run_numbers = [
+        int(path.name)
+        for path in root_dir.iterdir()
+        if path.is_dir() and len(path.name) == 3 and path.name.isdigit()
+    ]
+    run_dir = root_dir / f"{(max(run_numbers, default=0) + 1):03d}"
+    run_dir.mkdir()
+    return run_dir
 
 
 class MonitorNode:
@@ -107,6 +141,12 @@ class MonitorNode:
         self.env_folder = env_folder
         self.endpoint_map = _load_endpoint_map()
         self.neighbor_relay_enabled = NEIGHBOR_RELAY and bool(self.endpoint_map)
+        self.experiment_run_dir = _next_experiment_run_dir(self.root_dir / "data" / "experiment_runs")
+        self.monitor_log_path = self.experiment_run_dir / MONITOR_LOG_CSV
+        self.actual_schedule_path = self.experiment_run_dir / OUTPUT_CSV
+        self.monitor_log_file = self.monitor_log_path.open("w", newline="", encoding="utf-8")
+        self.monitor_log_writer = csv.DictWriter(self.monitor_log_file, fieldnames=MONITOR_LOG_FIELDS)
+        self.monitor_log_writer.writeheader()
 
         config_mpc_path = self.config_dir / os.getenv("MPC_CFG_NAME", "mpc_fast.yaml")
         config_robot_path = self.config_dir / "robot_spec.yaml"
@@ -114,6 +154,7 @@ class MonitorNode:
         self.config_robot = CircularRobotSpecification.from_yaml(str(config_robot_path))
 
         schedule_path, start_path = _schedule_paths(self.data_dir, SCHEDULE_VARIANT)
+        shutil.copy2(schedule_path, self.experiment_run_dir / schedule_path.name)
         map_path = self.data_dir / env_folder / "map.json"
         graph_path = self.data_dir / env_folder / "graph.json"
         with open(start_path, "r", encoding="utf-8") as handle:
@@ -134,6 +175,12 @@ class MonitorNode:
         self.plotter = MpcPlotInLoop(self.config_robot, map_only=MAP_ONLY, fig_ratio=(map_width / map_height))
         self.plotter.plot_in_loop_pre(self.gpc.current_map, graph_manager=self.gpc.current_graph)
 
+        self.schedule_node_ids: Dict[str, List[str]] = {}
+        for rid in self.robot_ids:
+            source_robot_id = self.robot_id_lookup[rid]
+            path_nodes, _, _ = self.gpc.get_schedule_with_node_index(source_robot_id)
+            self.schedule_node_ids[rid] = [str(node_id) for node_id in path_nodes]
+
         self.color_list = [
             "#0072B2", "#D55E00", "#009E73", "#F0E442", "#56B4E9",
             "#E69F00", "#CC79A7", "#0072B2", "#D55E00", "#009E73",
@@ -143,7 +190,11 @@ class MonitorNode:
         self.shadow_model = UnicycleModel(sampling_time=self.config_mpc.ts)
         self.shadow_states: Dict[str, np.ndarray] = {}
         self.last_packet_time: Dict[str, float] = {}
-        self.actual_timetable: Dict[str, List[Tuple[float, Optional[object]]]] = {rid: [] for rid in self.robot_ids}
+        self.actual_timetable: Dict[str, List[Tuple[float, Optional[object]]]] = {
+            rid: [(0.0, self.schedule_node_ids[rid][0])] if self.schedule_node_ids[rid] else []
+            for rid in self.robot_ids
+        }
+        self.completed_robot_ids: set[str] = set()
         self.latest_packet: Dict[str, TelemetryPacket] = {}
         self._relay_warned_missing_endpoint: set[str] = set()
 
@@ -179,7 +230,26 @@ class MonitorNode:
         self.sock.setblocking(False)
         self.peer_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if self.neighbor_relay_enabled else None
 
+        self.coord = Coordinator.from_csv(str(schedule_path))
+        self.coord_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.coord.load_graph_from_json(str(graph_path))
+
+        self.coord_shifted_targets = {}
+        self.coord_shifted_targets_compensated = {}
+        self.coord_handoff_planners = {}
+
+        self.coord_sequence = 0
+
+        # TODO: solve this, neeeded for coord scene 3
+        # self.coord.save_jobs(jobs_list)
+        # self.coord.save_initial_route(routes)
+
+        self.coord_modes: Dict[str, Optional[str]] = {
+            rid: None for rid in self.robot_ids
+        }
+
         print(f"[Monitor] Listening for telemetry on {TELEMETRY_BIND_IP}:{TELEMETRY_PORT}")
+        print(f"[Monitor] Experiment run folder: {self.experiment_run_dir}")
         if self.neighbor_relay_enabled:
             print(f"[Monitor] Relaying neighbor trajectories to bots on UDP port {NEIGHBOR_PORT}")
         elif NEIGHBOR_RELAY:
@@ -204,6 +274,73 @@ class MonitorNode:
             if not isinstance(decoded, TelemetryPacket):
                 continue
             self._handle_telemetry(decoded)
+
+    def _node_id_from_coord(self, coord) -> Optional[object]:
+        if coord is None:
+            return None
+
+        coord_xy = np.asarray(coord[:2], dtype=float)
+        for node_id in self.gpc.current_graph.nodes:
+            node_xy = np.asarray(self.gpc.current_graph.get_node_coord(node_id), dtype=float)
+            if np.allclose(coord_xy, node_xy, atol=1e-6):
+                return str(node_id)
+        return None
+
+    def _infer_next_schedule_node_id(self, rid: str) -> Optional[str]:
+        schedule_nodes = self.schedule_node_ids.get(rid, [])
+        history = self.actual_timetable.get(rid, [])
+        if not schedule_nodes or not history:
+            return None
+
+        last_node_id = str(history[-1][1])
+        try:
+            last_index = schedule_nodes.index(last_node_id)
+        except ValueError:
+            return None
+
+        if last_index + 1 < len(schedule_nodes):
+            return schedule_nodes[last_index + 1]
+        return schedule_nodes[-1]
+
+    def _target_node_id_from_packet(self, rid: str, packet: TelemetryPacket) -> Optional[str]:
+        target_node_id = self._node_id_from_coord(packet.current_target_node)
+        if target_node_id is not None:
+            return target_node_id
+
+        if packet.current_target_node is None:
+            return self._infer_next_schedule_node_id(rid)
+
+        return None
+
+    def _update_actual_timetable(self, rid: str, t: float, target_node_id: Optional[str], status: str) -> None:
+        if target_node_id is None or rid in self.completed_robot_ids:
+            return
+
+        history = self.actual_timetable[rid]
+        first_node_id = self.schedule_node_ids[rid][0] if self.schedule_node_ids[rid] else None
+        if history and history[-1][1] == target_node_id:
+            if len(history) == 1 and target_node_id == first_node_id:
+                return
+            history[-1] = (t, target_node_id)
+        else:
+            history.append((t, target_node_id))
+
+        if status.strip().lower() == "idle":
+            self.completed_robot_ids.add(rid)
+
+    def _write_monitor_log(self, packet: TelemetryPacket, pose: np.ndarray, action: np.ndarray, target_node_id) -> None:
+        self.monitor_log_writer.writerow({
+            "robot_id": packet.robot_id,
+            "schedule_id": packet.schedule_id,
+            "t": f"{float(packet.t):.9f}",
+            "x": f"{float(pose[0]):.9f}",
+            "y": f"{float(pose[1]):.9f}",
+            "theta": f"{float(pose[2]):.9f}",
+            "v": f"{float(action[0]) if action.size >= 1 else 0.0:.9f}",
+            "w": f"{float(action[1]) if action.size >= 2 else 0.0:.9f}",
+            "target_node_id": "" if target_node_id is None else target_node_id,
+        })
+        self.monitor_log_file.flush()
 
     def _prediction_from_packet(self, packet: TelemetryPacket) -> np.ndarray:
         """Return one robot's predicted trajectory as a dense `(N_hor+1, ns)` array.
@@ -296,18 +433,36 @@ class MonitorNode:
         current_refs = np.asarray(packet.current_refs, dtype=float) if packet.current_refs else np.empty((0, 3))
         cost = 0.0 if packet.cost is None else float(packet.cost)
 
+        target_node_id = self._target_node_id_from_packet(rid, packet)
+
         self.plotter.update_plot(rid, packet.t, action, pose, cost, pred_states, current_refs)
         self.visualizers[rid].update(*pose)
         self.latest_packet[rid] = packet
         self.last_packet_time[rid] = time.monotonic()
+        self._write_monitor_log(packet, pose, action, target_node_id)
+        self._update_actual_timetable(rid, packet.t, target_node_id, packet.status)
 
-        if packet.current_target_node is not None:
-            node_id = self.gpc.get_node_id(tuple(packet.current_target_node))
-            history = self.actual_timetable[rid]
-            if not history or history[-1][1] != node_id:
-                history.append((packet.t, node_id))
+        self.coord.update_horizon(rid, self._prediction_from_packet(packet))
+        self.coord.update_curr_pose(rid, pose)
+
+        if rid in self.coord_shifted_targets_compensated:
+            compensation = self.coord_shifted_targets_compensated[rid]
+            shifted_target = compensation["new_target"]
+            shifted_xy = np.asarray(shifted_target, dtype=float)
+
+            if np.linalg.norm(pose[:2] - shifted_xy) <= CROSSING_RELEASE_RADIUS:
+                self.coord.release_crossing_robot(rid)
+                self.coord_shifted_targets_compensated.pop(rid, None)
+                self.coord_shifted_targets.pop(rid, None)
+                print(f"[Monitor] Released crossing conflict for {rid} at shifted target {list(shifted_target)}")
+            elif target_node_id is not None and target_node_id != compensation["parent_node"]:
+                self.coord_shifted_targets_compensated.pop(rid, None)
+                self.coord_shifted_targets.pop(rid, None)
+                self.coord.update_target_nodes(rid, target_node_id)
             else:
-                history[-1] = (packet.t, node_id)
+                self.coord.update_target_nodes(rid, compensation["parent_node"])
+        elif target_node_id is not None:
+            self.coord.update_target_nodes(rid, target_node_id)
 
         if SHADOW_SIM:
             shadow_state = self.shadow_states[rid]
@@ -335,9 +490,110 @@ class MonitorNode:
         if not rows:
             return
         df = pd.DataFrame(rows).sort_values(["robot_id", "ETA"])
-        output_path = self.data_dir / OUTPUT_CSV
-        df.to_csv(output_path, index=False)
-        print(f"Saved monitored schedule to {output_path}")
+        df.to_csv(self.actual_schedule_path, index=False)
+        print(f"Saved monitored schedule to {self.actual_schedule_path}")
+
+    def _run_coordinator(self) -> None:
+        if not all(rid in self.last_packet_time for rid in self.robot_ids):
+            return
+
+        coord_time = max(packet.t for packet in self.latest_packet.values())
+        self.coord.update_time(coord_time)
+
+        decisions = self.coord.validate() or {}
+        released_crossing = False
+        for source_rid, decision in decisions.items():
+            if decision["mode"] != "crossing" or decision.get("target_coord") is None:
+                continue
+
+            rid = str(source_rid)
+            packet = self.latest_packet.get(rid)
+            if packet is None:
+                continue
+
+            pose_xy = np.asarray(packet.pose[:2], dtype=float)
+            target_xy = np.asarray(decision["target_coord"], dtype=float)
+            if np.linalg.norm(pose_xy - target_xy) <= CROSSING_RELEASE_RADIUS:
+                self.coord.release_crossing_robot(rid)
+                self.coord_shifted_targets_compensated.pop(rid, None)
+                self.coord_shifted_targets.pop(rid, None)
+                released_crossing = True
+                print(f"[Monitor] Released crossing conflict for {rid} at shifted target {target_xy.tolist()}")
+
+        if released_crossing:
+            decisions = self.coord.validate() or {}
+
+        requested_modes = {
+            rid: {"mode": "WORK", "target_coord": None}
+            for rid in self.robot_ids
+        }
+
+        # change mode to WAIT for the robot wherever needed
+        for source_rid, decicsion in decisions.items():
+            rid = str(source_rid)
+
+            if decicsion["mode"] == "stopped":
+                requested_modes[rid] = {"mode": "WAIT", "target_coord": None}
+            elif decicsion["mode"] == "crossing":
+                target_coord = tuple(decicsion["target_coord"])
+                parent_node = self.coord._current_target_node_ids.get(rid)
+                compensation = self.coord_shifted_targets_compensated.get(rid)
+
+                if compensation is None:
+                    self.coord_shifted_targets_compensated[rid] = {
+                        "parent_node": parent_node,
+                        "new_target": target_coord,
+                    }
+                else:
+                    compensation["new_target"] = target_coord
+
+                self.coord_shifted_targets[rid] = target_coord
+                requested_modes[rid] = {
+                    "mode": "CROSSING",
+                    "target_coord": list(target_coord),
+                }
+            else:
+                self.coord_shifted_targets_compensated.pop(rid, None)
+                self.coord_shifted_targets.pop(rid, None)
+                requested_modes[rid] = {"mode": "WORK", "target_coord": None}
+
+        self._send_coordinator_modes(requested_modes)
+
+    def _send_coordinator_modes(self, requested_modes) -> None:
+        if self.coord_sock is None:
+            return
+
+        for rid, request in requested_modes.items():
+            endpoint = self.endpoint_map.get(rid)
+
+            if endpoint is None:
+                if rid not in self._relay_warned_missing_endpoint:
+                    print(f"[Monitor] No coordinator endpoint for {rid}. Mode command skipped")
+
+                    self._relay_warned_missing_endpoint.add(rid)
+                continue
+
+            host, _ = endpoint
+
+            packet = CoordinatorModePacket(robot_id=rid,
+                        mode=request["mode"],
+                        sequence=self.coord_sequence,
+                        sent_at=time.time(),
+                        target_coord=request["target_coord"],
+                    )
+
+            previous_mode = self.coord_modes.get(rid)
+            current_mode = request["mode"]
+            if previous_mode != current_mode:
+                if previous_mode is None:
+                    print(f"[Monitor] Coordinator mode for {rid}: {current_mode}")
+                else:
+                    print(f"[Monitor] Coordinator mode for {rid}: {previous_mode} -> {current_mode}")
+                self.coord_modes[rid] = current_mode
+
+            self.coord_sock.sendto(packet_to_wire(packet), (host, COORDINATOR_PORT))
+
+        self.coord_sequence += 1
 
     def run(self) -> None:
         self.plotter.show()
@@ -345,6 +601,7 @@ class MonitorNode:
         try:
             while True:
                 self._poll_packets()
+                self._run_coordinator()
                 now = time.monotonic()
                 if now - last_plot_time >= max(IDLE_TIMEOUT, self.config_mpc.ts):
                     latest_t = 0.0
@@ -356,8 +613,10 @@ class MonitorNode:
             pass
         finally:
             self._save_actual_schedule()
+            self.monitor_log_file.close()
             self.plotter.close()
             self.sock.close()
+            self.coord_sock.close()
             if self.peer_sock is not None:
                 self.peer_sock.close()
 

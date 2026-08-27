@@ -14,8 +14,9 @@ from basic_map.graph import NetGraph
 from pkg_sche.sp_comsat.Compo_slim import Compo_slim
 from coordinator.local_replanning import repair_robot_path
 
-VEHICLE_WIDTH = 0.2
-VEHICLE_MARGIN = 0.1
+VEHICLE_WIDTH = 0.1
+VEHICLE_MARGIN = 0.2
+CROSSING_RELEASE_RADIUS = 0.2
 
 class Coordinator:
     """
@@ -48,6 +49,27 @@ class Coordinator:
         self.active_conflicts = {}
         self._pending_replans = {}          # replans for scenario 3
 
+        self._routes = None
+        self._jobs_list = None
+        self._remaining_task_ids = None
+
+        # task tracking
+        self._current_job = {}
+
+        self.dummy_mode = True
+        self.dummy_data = None
+
+        if self.dummy_mode:
+            dummy_path = pathlib.Path(__file__).with_name(
+                os.getenv("MPC_COORD_DUMMY_DATA", "dummy_data.json")
+            )
+
+            with dummy_path.open(
+                "r",
+                encoding="utf-8",
+            ) as read_file:
+                self.dummy_data = json.load(read_file)
+
         for rid in self._robot_ids:
             robot_schedule = self._total_schedule[self._total_schedule["robot_id"] == rid]
             self._remaining_nodes[rid] = robot_schedule["node_id"].tolist()
@@ -66,29 +88,6 @@ class Coordinator:
             self._remaining_nodes[rid].pop(0)
             self._remaining_schedule[rid].pop(0)
 
-            self._routes = None
-            self._jobs_list = None
-            self._remaining_task_ids = None
-
-            # task tracking
-            self._current_job = {}
-
-            self.dummy_mode = True
-            self.dummy_data = None
-
-            if self.dummy_mode:
-                dummy_path = pathlib.Path(__file__).with_name(
-                    "dummy_data.json"
-                )
-
-                with dummy_path.open(
-                    "r",
-                    encoding="utf-8",
-                ) as read_file:
-                    self.dummy_data = json.load(read_file)
-                
-                # print(self.dummy_data)
-
 
     @classmethod
     def from_csv(cls, csv_path: str, csv_sep:str=','):
@@ -102,13 +101,24 @@ class Coordinator:
 
         self.add_target_coords()
 
-    def save_initial_route(self, routes):
+    def save_initial_route(self, routes=None):
         self._routes = routes
 
         if self.dummy_mode:
+            if self._jobs_list is None:
+                self.save_jobs()
             self._routes = self.dummy_data["initial_routes"]
+        elif self._routes is None:
+            raise ValueError("save_initial_route requires routes when dummy_mode is disabled.")
 
-        print(f'[coord] Initial routes: {self._routes}')
+        missing_routes = set(self._robot_ids) - set(self._routes)
+        if missing_routes:
+            raise ValueError(
+                f"Missing routes for robot IDs {sorted(missing_routes)}. "
+                "Check that the selected coordinator dummy data matches the schedule."
+            )
+
+        # print(f'[coord] Initial routes: {self._routes}')
 
         self._remaining_task_ids = {
             rid: list(route["tasks"]) for rid, route in self._routes.items()
@@ -126,7 +136,7 @@ class Coordinator:
                 
         # print(f'[coord] remaining task ids: {self._remaining_task_ids}')
 
-    def save_jobs(self, jobs_list):
+    def save_jobs(self, jobs_list=None):
         self._jobs_list = jobs_list
 
         if self.dummy_mode:
@@ -149,6 +159,10 @@ class Coordinator:
 
 
     def update_target_nodes(self, robot_id, target_node):
+
+        if not self._current_job:
+            self.save_jobs()
+            self.save_initial_route()
         
         if len(self._current_target_node_ids) == len(self._robot_ids):
             
@@ -190,8 +204,8 @@ class Coordinator:
                         pending_replan["status"] = "replacement_ready"
 
                     # updating next node
-                    if self._remaining_nodes[robot_id]:
-                        self._next_node_ids[robot_id] = self._remaining_nodes[robot_id][0]
+                    if len(self._remaining_nodes[robot_id]) > 1:
+                        self._next_node_ids[robot_id] = self._remaining_nodes[robot_id][1]
                     else:
                         self._next_node_ids[robot_id] = None
 
@@ -236,6 +250,8 @@ class Coordinator:
     def validate(self):
         """ Validates current path of robots to avoid deadlock scenarios """
         # print(f'\n[coord] schedule list:{self._remaining_schedule}')
+        # print(f'\n[coord] current target node:{self._current_target_node_ids}')
+        # print(f'\n[coord] next node:{self._next_node_ids}')
 
         # check if robots are heading towards the same node [COORDINATOR SCENE 1]
         target_node_list = set(self._current_target_node_ids.values())
@@ -259,8 +275,9 @@ class Coordinator:
                     for rid in conflict['stopped']:
                         return_val[rid] = {'mode': 'stopped', 'target_coord': None}
 
-                    for rid in conflict["handoff"]:
-                        return_val[rid] = {"mode": "handoff", "target_coord": node}
+                    if conflict["mode"] ==3:
+                        for rid in conflict["handoff"]:
+                            return_val[rid] = {"mode": "handoff", "target_coord": node}
 
                 else:
                     # next node to travel to after conflicting node [COORDINATOR SCENE 2]
@@ -301,19 +318,6 @@ class Coordinator:
                             }
 
                             print(self._pending_replans)
-                            # frozen_schedules = self.frozen_schedule_builder(replan_rid)
-                            # print(f'[coord] Scene 3 stopped robot: {wait_rid}')
-                            # print(f'[coord] Total Schedule: {self._total_schedule}')
-                            # print(f'[coord] Frozen Schedules: {frozen_schedules}')
-
-                            # fff = repair_robot_path(replan_rid, self._curr_pose[replan_rid], 
-                            #                         self._prev_node_ids[replan_rid], self._current_target_node_ids[replan_rid],
-                            #                         self._graph,
-                            #                         node, self._ts, 
-                            #                         self._jobs_list, self._routes, self._remaining_task_ids,
-                            #                         frozen_schedules)
-
-                            # exit()
 
                         elif self._prev_node_ids[rid_1] == self._next_node_ids[rid_2]:
                             print('[coord] Scene 2 conflict occuring 2-->1')
@@ -434,14 +438,14 @@ class Coordinator:
         # assuming paths are in the same grid as demo, there will be change in coord of only one axis
         if curr_target_coord[0] == next_target_coord[0]:
             if next_target_coord[1] - curr_target_coord[1] > 0:
-                new_target_coord = (next_target_coord[0], (curr_target_coord[1] + 3 * VEHICLE_WIDTH))
+                new_target_coord = (next_target_coord[0], (curr_target_coord[1] + 1.5 * VEHICLE_WIDTH))
             else:
-                new_target_coord = (next_target_coord[0], (curr_target_coord[1] - 3 * VEHICLE_WIDTH))
+                new_target_coord = (next_target_coord[0], (curr_target_coord[1] - 1.5 * VEHICLE_WIDTH))
         else:
             if next_target_coord[0] - curr_target_coord[0] > 0:
-                new_target_coord = ((curr_target_coord[0] + 3 * VEHICLE_WIDTH), next_target_coord[1])
+                new_target_coord = ((curr_target_coord[0] + 1.5 * VEHICLE_WIDTH), next_target_coord[1])
             else:
-                new_target_coord = ((curr_target_coord[0] - 3 * VEHICLE_WIDTH), next_target_coord[1])
+                new_target_coord = ((curr_target_coord[0] - 1.5 * VEHICLE_WIDTH), next_target_coord[1])
 
         return new_target_coord
     
@@ -480,6 +484,18 @@ class Coordinator:
 
         if(pending_replan and pending_replan["status"] == "approaching_handoff"):
             self.update_target_nodes(rid, self._next_node_ids[rid])
+
+    def release_crossing_robot(self, rid):
+        """Mark a robot as past its shifted crossing target."""
+
+        next_node = self._next_node_ids.get(rid)
+        if next_node is not None:
+            self.update_target_nodes(rid, next_node)
+            return
+
+        for node, conflict in list(self.active_conflicts.items()):
+            if rid in conflict.get("crossing", []):
+                self.active_conflicts.pop(node)
 
     def take_ready_replan(self, rid):
         pending_replan = self._pending_replans.get(rid)
@@ -534,15 +550,4 @@ class Coordinator:
 
 
 # TODO:
-# 1. [DONE]coordinator scene 3 - position
-# 1. coordinator scene 3 - selection policy?
-# 2. coordinator scene 3 - setup: 
-#       [DONE]add loading from dummy_data.json 
-#       [DONE]send data to local_replanning.py 
-#       [DONE]build problem and correct data imports for replanning 
-#       [DONE]send problem to compo slim 
-#       [DONE]stop the not replanned robot and make the replan robot earch target
-#       integrate new path of robot and resume the stopped robot 
-#       ensure that mpc planner is doing correct work
-# 3. coordinator scene 3 - testing
 # 4. test scene 1 usage on the big demo

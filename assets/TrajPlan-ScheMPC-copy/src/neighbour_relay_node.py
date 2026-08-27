@@ -31,7 +31,7 @@ from configs import MpcConfiguration
 from messages import NeighborStatesPacket, TelemetryPacket, packet_from_json, packet_to_wire
 
 # IP where horizons are received from the bots. This is just the laptop ip adress.
-HORIZON_RECEIVER_IP = "192.168.1.9"         # tosh
+HORIZON_RECEIVER_IP = "192.168.1.10"         # tosh
 # HORIZON_RECEIVER_IP = "192.168.1.10"        # kim
 
 RECEIVER_PORT = 5008        # receive on this port(bots send to <laptop_ip>:<this_port>)

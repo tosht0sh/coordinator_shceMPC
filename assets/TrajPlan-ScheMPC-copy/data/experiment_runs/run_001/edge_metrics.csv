@@ -1,0 +1,5 @@
+edge_index,edge,start_node,end_node,kind,length,dt_sched,v_req,feasible,sample_count,error_rmse,error_mae,error_max_abs,error_p95_abs,error_mean_signed
+0,N00->N10,N00,N10,horizontal,0.8999999999999999,2.25,0.39999999999999997,True,0,,,,,
+1,N10->N11,N10,N11,vertical,0.8999999999999999,2.25,0.39999999999999997,True,0,,,,,
+2,N11->N12,N11,N12,vertical,0.8999999999999999,2.25,0.39999999999999997,True,0,,,,,
+3,N12->N22,N12,N22,horizontal,0.9000000000000001,2.25,0.4000000000000001,False,0,,,,,

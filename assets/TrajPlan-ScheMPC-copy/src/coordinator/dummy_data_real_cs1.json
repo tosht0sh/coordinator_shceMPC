@@ -1,0 +1,62 @@
+{
+    "initial_routes": {
+        "A1": {
+            "tasks": ["start_N01", "01", "end_N21"],
+            "nodes": ["N01", "N11", "N21"],
+            "edges": [["N01", "N11"], ["N11", "N21"]]
+        },
+        "A2": {
+            "tasks": ["start_N10", "11", "end_N12"],
+            "nodes": ["N10", "N11", "N12"],
+            "edges": [["N10", "N11"], ["N11", "N12"]]
+        }
+    },
+    "jobs_list": {
+        "A1": {
+            "01": {
+                "location": "N11",
+                "precedence": [],
+                "TW": [],
+                "Service": 0,
+                "ATR": ["A1"]
+            },
+            "start_N01": {
+                "location": "N01",
+                "precedence": [],
+                "TW": [],
+                "Service": 0,
+                "ATR": ["A1"]
+            },
+            "end_N21": {
+                "location": "N21",
+                "precedence": "None",
+                "TW": [0, 500],
+                "Service": 0,
+                "ATR": ["A1"]
+            }
+        },
+        "A2": {
+            "11": {
+                "location": "N11",
+                "precedence": [],
+                "TW": [],
+                "Service": 0,
+                "ATR": ["A2"]
+            },
+            "start_N10": {
+                "location": "N10",
+                "precedence": [],
+                "TW": [],
+                "Service": 0,
+                "ATR": ["A2"]
+            },
+            "end_N12": {
+                "location": "N12",
+                "precedence": "None",
+                "TW": [0, 500],
+                "Service": 0,
+                "ATR": ["A2"]
+            }
+        }
+    }
+}

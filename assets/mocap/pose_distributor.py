@@ -7,7 +7,7 @@ import time
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # Bind on the laptop-side data IP so the QTM stream can target this relay.
-sock.bind(("192.168.1.9", 5005))        # tosh
+sock.bind(("192.168.1.10", 5005))        # tosh
 # sock.bind(("192.168.1.10", 5005))       # kim
 sock.setblocking(False)
 
@@ -17,8 +17,8 @@ sock.setblocking(False)
 forward_targets = {
     "duck1": ("192.168.1.11", 5005),
     "duck2": ("192.168.1.12", 5005),
-    # "duck3": ("192.168.1.13", 5005),
-    # "duck4": ("192.168.1.14", 5005),
+    "duck4": ("192.168.1.13", 5005),
+    "duck6": ("192.168.1.14", 5005),
 }
 
 latest_data = None
