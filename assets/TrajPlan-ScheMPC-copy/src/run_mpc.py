@@ -83,7 +83,7 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
     graph_path = os.path.join(data_dir, f"{EnvFolder}/graph.json")
 
     ## Load schedule of orignal problem
-    schedule_path = os.path.join(data_dir, "schedule.csv")
+    # schedule_path = os.path.join(data_dir, "schedule.csv")
     # start_path = os.path.join(data_dir, "robot_start.json")
 
     #### PHYSICAL ROBOT SCHEDULES
@@ -99,14 +99,17 @@ def run_mpc(EnvFolder, routes, jobs_list, naive_tracker=False, ignore_speed_ref=
     # start_path = os.path.join(data_dir, "robot_start_TwoRobots.json")
 
     #### SIMULATION SCHEDULES
-    ## Load schedule of CoordScene1 & CoordScene2
+    ## Load schedule of CoordScene1
     # schedule_path = os.path.join(data_dir, "schedule_CoordScene1.csv")
-    # schedule_path = os.path.join(data_dir, "schedule_CoordScene2.csv")
-    start_path = os.path.join(data_dir, "robot_start_CoordScene2.json")
+    # start_path = os.path.join(data_dir, "robot_start_CoordScene1.json")
 
+    ## Load schedule of CoordScene2
+    # schedule_path = os.path.join(data_dir, "schedule_CoordScene2.csv")
+    # start_path = os.path.join(data_dir, "robot_start_CoordScene2.json")
+    
     ## Load schedule of CoordScene3
-    # schedule_path = os.path.join(data_dir, "schedule_CoordScene3.csv")
-    # start_path = os.path.join(data_dir, "robot_start_CoordScene3.json")
+    schedule_path = os.path.join(data_dir, "schedule_CoordScene3.csv")
+    start_path = os.path.join(data_dir, "robot_start_CoordScene3.json")
 
     ## Open schedule
     with open(start_path, "r") as f:

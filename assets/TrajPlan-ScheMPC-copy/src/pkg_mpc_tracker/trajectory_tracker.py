@@ -493,14 +493,14 @@ class TrajectoryTracker:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
         
-        # if theta_diff > 100: # and theta_diff_last > 90:
-        #     self.set_work_mode(mode='aligning')
-        #     if not ignore_speed_ref:
-        #         # Large heading errors are better handled as an in-place alignment
-        #         # problem; asking for forward travel here tends to produce arcs/spins.
-        #         speed_ref_list = [0.0] * self.N_hor
-        # else:
-        #     self.set_work_mode(mode='work', use_predefined_speed=False)
+        if theta_diff > 100: # and theta_diff_last > 90:
+            self.set_work_mode(mode='aligning')
+            if not ignore_speed_ref:
+                # Large heading errors are better handled as an in-place alignment
+                # problem; asking for forward travel here tends to produce arcs/spins.
+                speed_ref_list = [0.0] * self.N_hor
+        else:
+            self.set_work_mode(mode='work', use_predefined_speed=False)
 
         ### Check if turning around ###
         mid_idx = min(3, self.N_hor - 1)

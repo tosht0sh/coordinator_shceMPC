@@ -61,7 +61,7 @@ class Coordinator:
 
         if self.dummy_mode:
             dummy_path = pathlib.Path(__file__).with_name(
-                os.getenv("MPC_COORD_DUMMY_DATA", "dummy_data_real1.json")
+                os.getenv("MPC_COORD_DUMMY_DATA", "dummy_data.json")
             )
 
             with dummy_path.open(

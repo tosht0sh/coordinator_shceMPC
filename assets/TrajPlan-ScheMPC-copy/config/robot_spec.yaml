@@ -24,12 +24,12 @@ social_margin: 0.0   # Vehicle extra social margin for soft loss terms
 # ang_acc_max: 8.0 #3.0   # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
 
 ### DUCK 2 ###
-lin_vel_min: -0.1 #0.50 #Vehicle contraint on the minimal velocity possible
-lin_vel_max: 0.4 #0.20   # Vehicle contraint on the maximal velocity possible
-lin_acc_min: -1.5 #-0.60   # Vehicle contraint on the maximal linear retardation
-lin_acc_max: 3.0 #1.5 #0.60       # Vehicle contraint on the maximal linear acceleration
-ang_vel_max: 6.0 #2.5  # Vehicle contraint on the maximal angular velocity
-ang_acc_max: 8.0 #3.0   # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
+# lin_vel_min: -0.1 #0.50 #Vehicle contraint on the minimal velocity possible
+# lin_vel_max: 0.4 #0.20   # Vehicle contraint on the maximal velocity possible
+# lin_acc_min: -1.5 #-0.60   # Vehicle contraint on the maximal linear retardation
+# lin_acc_max: 3.0 #1.5 #0.60       # Vehicle contraint on the maximal linear acceleration
+# ang_vel_max: 6.0 #2.5  # Vehicle contraint on the maximal angular velocity
+# ang_acc_max: 8.0 #3.0   # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
 
 
 ### Worked OK for duck 4,6 but not for duck1. Too weak ###
@@ -42,9 +42,13 @@ ang_acc_max: 8.0 #3.0   # Vehicle contraint on the maximal angular acceleration 
 
 
 ### Use this for simulation.
-# lin_vel_min: -0.1    # Vehicle contraint on the minimal velocity possible
-# lin_vel_max: 1.5     # Vehicle contraint on the maximal velocity possible
-# lin_acc_min: -1      # Vehicle contraint on the maximal linear retardation
-# lin_acc_max: 1       # Vehicle contraint on the maximal linear acceleration
-# ang_vel_max: 2.5     # Vehicle contraint on the maximal angular velocity
-# ang_acc_max: 3       # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
+# vehicle_width:  0.5  # Vehicle width in meters
+# vehicle_margin: 0.2  # Vehicle extra safe margin
+# social_margin: 0.2   # Vehicle extra social margin for soft loss terms
+
+lin_vel_min: -0.1    # Vehicle contraint on the minimal velocity possible
+lin_vel_max: 1.5     # Vehicle contraint on the maximal velocity possible
+lin_acc_min: -1      # Vehicle contraint on the maximal linear retardation
+lin_acc_max: 1       # Vehicle contraint on the maximal linear acceleration
+ang_vel_max: 2.5     # Vehicle contraint on the maximal angular velocity
+ang_acc_max: 3       # Vehicle contraint on the maximal angular acceleration (considered to be symmetric)
